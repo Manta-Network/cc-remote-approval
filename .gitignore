@@ -1,0 +1,13 @@
+.DS_Store
+*.swp
+*.swo
+*~
+.env
+.mcp.json
+.claude/
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache
+hooks/stop.py

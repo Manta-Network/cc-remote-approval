@@ -1,0 +1,11 @@
+{
+  "name": "cc-remote-approval",
+  "version": "0.3.0",
+  "description": "Claude Code plugin — remote permission approval via Telegram when you're away from the keyboard",
+  "author": {
+    "name": "Manta Network"
+  },
+  "repository": "https://github.com/Manta-Network/cc-remote-approval",
+  "license": "MIT",
+  "keywords": ["telegram", "hooks", "remote", "notifications", "mobile"]
+}

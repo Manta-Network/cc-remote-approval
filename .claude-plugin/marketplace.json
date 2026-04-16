@@ -1,0 +1,13 @@
+{
+  "name": "manta",
+  "owner": {
+    "name": "Manta Network"
+  },
+  "plugins": [
+    {
+      "name": "cc-remote-approval",
+      "source": "./",
+      "description": "Forward Claude Code permission requests to Telegram"
+    }
+  ]
+}

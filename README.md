@@ -46,6 +46,8 @@ In Claude Code, run:
 /reload-plugins
 ```
 
+Then **start a new session** (or `/clear`) so the SessionStart hook can inject the AskUserQuestion preference hint into the conversation context.
+
 For local development, point the marketplace at your clone instead:
 
 ```

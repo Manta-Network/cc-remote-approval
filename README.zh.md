@@ -46,6 +46,8 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
 /reload-plugins
 ```
 
+然后**开启新 session**（或 `/clear`），让 SessionStart hook 将 AskUserQuestion 偏好提示注入到对话上下文中。
+
 本地开发时指向你的 clone 目录：
 
 ```

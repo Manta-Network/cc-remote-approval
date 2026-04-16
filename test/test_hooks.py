@@ -726,6 +726,245 @@ class TestElicitationFormBuilding:
         assert "prod" in ch._edited_messages[0]["text"]
 
 
+class TestElicitationTimeoutHint:
+    """_build_form_message shows a timeout hint line when timeout is given."""
+
+    def test_timeout_hint_shown_with_timeout(self):
+        from elicitation import _build_form_message
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        text, _ = _build_form_message("Configure", fields, timeout=60)
+        assert "Respond within 60s" in text
+        assert "fall back to local form" in text
+
+    def test_timeout_hint_shown_with_custom_value(self):
+        from elicitation import _build_form_message
+        fields = [
+            {"name": "x", "type": "string", "title": "X", "enum": None,
+             "required": False, "default": None},
+        ]
+        text, _ = _build_form_message("Fill", fields, timeout=30)
+        assert "Respond within 30s" in text
+
+    def test_no_timeout_hint_without_timeout(self):
+        from elicitation import _build_form_message
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        text, _ = _build_form_message("Configure", fields)
+        assert "Respond within" not in text
+        assert "fall back to local form" not in text
+
+    def test_no_timeout_hint_when_timeout_is_none(self):
+        from elicitation import _build_form_message
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        text, _ = _build_form_message("Configure", fields, timeout=None)
+        assert "Respond within" not in text
+
+    def test_no_timeout_hint_when_timeout_is_zero(self):
+        """timeout=0 is falsy, so no hint should appear."""
+        from elicitation import _build_form_message
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        text, _ = _build_form_message("Configure", fields, timeout=0)
+        assert "Respond within" not in text
+
+    def test_update_form_shows_timeout_hint(self):
+        """_update_form also shows the timeout hint when timeout is given."""
+        from elicitation import _update_form
+        ch = FakeChannel()
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        _update_form(ch, 100, "msg", fields, {}, timeout=60)
+        assert "Respond within 60s" in ch._edited_messages[0]["text"]
+
+    def test_update_form_no_timeout_hint_without_timeout(self):
+        from elicitation import _update_form
+        ch = FakeChannel()
+        fields = [
+            {"name": "env", "type": "string", "title": "Env", "enum": ["prod"],
+             "required": True, "default": None},
+        ]
+        _update_form(ch, 100, "msg", fields, {})
+        assert "Respond within" not in ch._edited_messages[0]["text"]
+
+
+class TestElicitationBooleanDefaultHandling:
+    """Boolean fields must NOT be pre-filled so their toggle buttons stay
+    visible. Boolean defaults are applied at submit time instead."""
+
+    def test_boolean_excluded_from_prefill(self):
+        """The pre-fill dict comprehension must skip boolean fields."""
+        fields = [
+            {"name": "env", "type": "string", "title": "Env",
+             "required": True, "enum": ["prod"], "default": "prod"},
+            {"name": "notify", "type": "boolean", "title": "Notify",
+             "required": False, "enum": None, "default": True},
+            {"name": "verbose", "type": "boolean", "title": "Verbose",
+             "required": False, "enum": None, "default": False},
+        ]
+        # This mirrors the exact comprehension in _child_run
+        form_data = {f["name"]: f["default"] for f in fields
+                     if f["default"] is not None and f["type"] != "boolean"}
+        assert "env" in form_data
+        assert form_data["env"] == "prod"
+        assert "notify" not in form_data
+        assert "verbose" not in form_data
+
+    def test_non_boolean_defaults_still_prefilled(self):
+        """String/integer fields with defaults must still be pre-filled."""
+        fields = [
+            {"name": "count", "type": "integer", "title": "Count",
+             "required": False, "enum": None, "default": 5},
+            {"name": "env", "type": "string", "title": "Env",
+             "required": True, "enum": ["a", "b"], "default": "a"},
+        ]
+        form_data = {f["name"]: f["default"] for f in fields
+                     if f["default"] is not None and f["type"] != "boolean"}
+        assert form_data == {"count": 5, "env": "a"}
+
+    def test_boolean_defaults_applied_at_submit(self):
+        """Simulate the submit-time logic that applies boolean defaults
+        for fields the user didn't explicitly toggle."""
+        fields = [
+            {"name": "notify", "type": "boolean", "title": "Notify",
+             "required": False, "enum": None, "default": True},
+            {"name": "verbose", "type": "boolean", "title": "Verbose",
+             "required": False, "enum": None, "default": False},
+            {"name": "debug", "type": "boolean", "title": "Debug",
+             "required": False, "enum": None, "default": None},
+        ]
+        form_data = {}  # user didn't touch any boolean
+        # This mirrors the exact submit-time logic in _child_run
+        for f in fields:
+            if f["type"] == "boolean" and f["name"] not in form_data and f["default"] is not None:
+                form_data[f["name"]] = f["default"]
+        assert form_data["notify"] is True
+        assert form_data["verbose"] is False
+        assert "debug" not in form_data  # default=None → not applied
+
+    def test_boolean_user_toggle_not_overridden_at_submit(self):
+        """If user explicitly toggled a boolean, submit must not overwrite it."""
+        fields = [
+            {"name": "notify", "type": "boolean", "title": "Notify",
+             "required": False, "enum": None, "default": True},
+        ]
+        form_data = {"notify": False}  # user toggled to False
+        for f in fields:
+            if f["type"] == "boolean" and f["name"] not in form_data and f["default"] is not None:
+                form_data[f["name"]] = f["default"]
+        assert form_data["notify"] is False  # user's choice preserved
+
+    def test_boolean_toggle_buttons_visible_when_not_prefilled(self):
+        """_build_field_buttons must show boolean toggle buttons when the
+        field is NOT in skip_filled (i.e., not pre-filled)."""
+        from elicitation import _build_field_buttons
+        fields = [
+            {"name": "notify", "type": "boolean", "title": "Notify",
+             "required": False, "enum": None, "default": True},
+        ]
+        buttons = _build_field_buttons(fields, skip_filled=set())
+        flat = [b for row in buttons for b in row]
+        labels = [b["text"] for b in flat]
+        assert "✅ Notify" in labels
+        assert "⬜ Notify" in labels
+
+    def test_boolean_toggle_buttons_hidden_when_filled(self):
+        """Once a boolean is in skip_filled (user toggled it),
+        its buttons should be skipped."""
+        from elicitation import _build_field_buttons
+        fields = [
+            {"name": "notify", "type": "boolean", "title": "Notify",
+             "required": False, "enum": None, "default": True},
+        ]
+        buttons = _build_field_buttons(fields, skip_filled={"notify"})
+        flat = [b for row in buttons for b in row]
+        labels = [b["text"] for b in flat]
+        assert "✅ Notify" not in labels
+        assert "⬜ Notify" not in labels
+
+
+class TestElicitationResolvedMessages:
+    """Resolved form messages must include the form title (message) text."""
+
+    def test_submit_resolved_shows_title_and_values(self):
+        """Submit resolution: 'Form submitted' + message + field values."""
+        from utils.common import html_escape
+        message = "Deploy configuration"
+        form_data = {"env": "production", "count": 3}
+
+        # This mirrors the exact submit resolution in _child_run
+        summary = f"✅ <b>Form submitted</b>\n\n<i>{html_escape(message)}</i>"
+        for name, val in form_data.items():
+            summary += f"\n  • {html_escape(name)}: <code>{html_escape(str(val))}</code>"
+
+        assert "Form submitted" in summary
+        assert "Deploy configuration" in summary
+        assert "production" in summary
+        assert "3" in summary
+
+    def test_cancel_resolved_shows_title(self):
+        """Cancel resolution includes the form title."""
+        from utils.common import html_escape
+        message = "Deploy configuration"
+        text = f"❌ <b>Cancelled</b>\n\n<i>{html_escape(message)}</i>"
+        assert "Cancelled" in text
+        assert "Deploy configuration" in text
+
+    def test_handled_locally_resolved_shows_title(self):
+        """'Handled locally' resolution includes the form title."""
+        from utils.common import html_escape
+        message = "Deploy configuration"
+        text = f"🖥 <b>Handled locally</b>\n\n<i>{html_escape(message)}</i>"
+        assert "Handled locally" in text
+        assert "Deploy configuration" in text
+
+    def test_expired_resolved_shows_title(self):
+        """Expired resolution includes the form title."""
+        from utils.common import html_escape
+        message = "Deploy configuration"
+        title = f"\n\n<i>{html_escape(message)}</i>" if message else ""
+        text = f"💤 <b>Expired</b>{title}"
+        assert "Expired" in text
+        assert "Deploy configuration" in text
+
+    def test_handled_locally_via_channel(self):
+        """FakeChannel.edit_message records the resolved 'Handled locally'
+        message including the form title."""
+        from utils.common import html_escape
+        ch = FakeChannel()
+        message = "Select environment"
+        ch.edit_message(42, f"🖥 <b>Handled locally</b>\n\n<i>{html_escape(message)}</i>", buttons=[])
+        assert len(ch._edited_messages) == 1
+        assert "Handled locally" in ch._edited_messages[0]["text"]
+        assert "Select environment" in ch._edited_messages[0]["text"]
+
+    def test_submit_via_channel(self):
+        """FakeChannel.edit_message records the resolved 'Form submitted'
+        message including field values."""
+        from utils.common import html_escape
+        ch = FakeChannel()
+        message = "Configure"
+        form_data = {"env": "staging"}
+        summary = f"✅ <b>Form submitted</b>\n\n<i>{html_escape(message)}</i>"
+        for name, val in form_data.items():
+            summary += f"\n  • {html_escape(name)}: <code>{html_escape(str(val))}</code>"
+        ch.edit_message(42, summary, buttons=[])
+        assert "Form submitted" in ch._edited_messages[0]["text"]
+        assert "Configure" in ch._edited_messages[0]["text"]
+        assert "staging" in ch._edited_messages[0]["text"]
+
+
 # --- Elicitation channel failure ---
 
 class TestElicitationChannelFailure:

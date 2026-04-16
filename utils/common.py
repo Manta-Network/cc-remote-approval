@@ -206,7 +206,7 @@ def format_context_lines(transcript_path, max_turns=3, max_chars=200):
             text = text_lines[0] if text_lines else ""
             if not text or len(text) < 3:
                 continue
-        lines.append(f"{prefix} {time_label}{html_escape(mask_secrets(text))}")
+        lines.append(f"{time_label}{prefix} {html_escape(mask_secrets(text))}")
     return lines
 
 

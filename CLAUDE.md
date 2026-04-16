@@ -77,7 +77,7 @@ create_channel(cfg) reads cfg["channel_type"] and returns the right implementati
 | File | Description |
 |---|---|
 | `hooks/permission_request.py` | Sleep N seconds → detect local response → if none, send via channel → poll for callback → return decision |
-| `hooks/elicitation.py` | Fork: child sends form immediately, parent blocks 60s. Channel responds → return data; timeout → show local form + activate terminal |
+| `hooks/elicitation.py` | Fork: child sends form immediately (with timeout countdown hint), parent blocks 60s. Channel responds → return data; timeout → show local form + activate terminal. Boolean defaults applied at submit, not pre-filled. Resolved messages include form title + submitted values. |
 | `hooks/elicitation_result.py` | User fills form locally → write signal file → child updates channel |
 | `hooks/notification.py` | Fire-and-forget: send notification when agent is idle |
 | `hooks/session_start.py` | Fires on new session — injects a system-context hint steering Claude to prefer the `AskUserQuestion` tool over free-text option lists (structured tool = reliable button UI on the channel, no heuristic parsing needed). Only fires when a channel is configured. |
@@ -108,7 +108,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 169 tests, ~0.1s
+pytest test/ -v    # 188 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -153,7 +153,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | 5-10 | **Notebook/PowerShell/Skill/Sandbox/ComputerUse/EnterPlan** | PermissionRequest | ✅ | Same hook |
 | 11 | **Exit Plan mode** | PermissionRequest | ✅ | No Always button |
 | 12 | **AskUserQuestion** | PermissionRequest | ✅ | Single/multi-select/text |
-| 13 | **MCP form (Elicitation)** | Elicitation | ✅ | Hybrid: channel direct or timeout → local form |
+| 13 | **MCP form (Elicitation)** | Elicitation | ✅ | Hybrid: channel direct or timeout → local form. Shows timeout countdown hint; resolved messages include form title |
 | 14 | **Prompt change** | PromptRequest | ❌ | Not implemented |
 | 15 | **PreToolUse intercept** | PreToolUse | ❌ | Not implemented |
 | 16 | **Idle waiting** | Notification | ✅ | idle_prompt |
@@ -169,7 +169,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | Scope | Coverage |
 |---|---|
 | Hookable scenarios (#1-17) | **14/17 (82%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **169 tests in ~0.1s** |
+| Automated tests | **188 tests in ~0.1s** |
 | All UI scenarios (#1-29) | **14/29 (48%)** |
 
 ## Coding Standards

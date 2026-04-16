@@ -162,18 +162,21 @@ def _child_run(cfg, server_name, message, fields,
 
     # Pre-fill defaults so the user doesn't have to manually set fields
     # that already have a sensible value in the schema.
-    form_data = {f["name"]: f["default"] for f in fields if f["default"] is not None}
+    # Exclude booleans — their toggle buttons should stay visible until
+    # the user explicitly clicks; defaults are applied at submit time.
+    form_data = {f["name"]: f["default"] for f in fields
+                 if f["default"] is not None and f["type"] != "boolean"}
 
     while True:
         if os.path.exists(timeout_file):
             _log("Parent timed out, updating message")
             _edit_terminal_fallback(ch, msg_id, message, fields, form_data)
-            _wait_for_local_done(ch, msg_id, done_file)
+            _wait_for_local_done(ch, msg_id, done_file, message)
             return
 
         if os.path.exists(done_file):
             _log("User filled locally during Phase 1")
-            ch.edit_message(msg_id, "🖥 <b>Handled locally</b>", buttons=[])
+            ch.edit_message(msg_id, f"🖥 <b>Handled locally</b>\n\n<i>{html_escape(message)}</i>", buttons=[])
             return
 
         update = ch.poll(msg_id)
@@ -207,14 +210,21 @@ def _child_run(cfg, server_name, message, fields,
                     _log(f"Submit blocked — missing required: {missing}")
                     _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
                     continue
+                # Apply boolean defaults for fields the user didn't touch
+                for f in fields:
+                    if f["type"] == "boolean" and f["name"] not in form_data and f["default"] is not None:
+                        form_data[f["name"]] = f["default"]
                 _log(f"Submit: {form_data}")
-                ch.edit_message(msg_id, "✅ <b>Form submitted</b>", buttons=[])
+                summary = f"✅ <b>Form submitted</b>\n\n<i>{html_escape(message)}</i>"
+                for name, val in form_data.items():
+                    summary += f"\n  • {html_escape(name)}: <code>{html_escape(str(val))}</code>"
+                ch.edit_message(msg_id, summary, buttons=[])
                 _write_response(response_file, ELICIT_ACCEPT, form_data)
                 return
 
             elif data == "cancel":
                 _log("Cancel")
-                ch.edit_message(msg_id, "❌ <b>Cancelled</b>", buttons=[])
+                ch.edit_message(msg_id, f"❌ <b>Cancelled</b>\n\n<i>{html_escape(message)}</i>", buttons=[])
                 _write_response(response_file, ELICIT_DECLINE, {})
                 return
 
@@ -242,15 +252,16 @@ def _child_run(cfg, server_name, message, fields,
                 break
 
 
-def _wait_for_local_done(ch, msg_id, done_file):
+def _wait_for_local_done(ch, msg_id, done_file, message=""):
     """After timeout, wait for user to fill form locally."""
+    title = f"\n\n<i>{html_escape(message)}</i>" if message else ""
     for _ in range(300):  # max 5 minutes
         if os.path.exists(done_file):
             _log("Local done signal received")
-            ch.edit_message(msg_id, "🖥 <b>Handled locally</b>", buttons=[])
+            ch.edit_message(msg_id, f"🖥 <b>Handled locally</b>{title}", buttons=[])
             return
         time.sleep(1)
-    ch.edit_message(msg_id, "💤 <b>Expired</b>", buttons=[])
+    ch.edit_message(msg_id, f"💤 <b>Expired</b>{title}", buttons=[])
 
 
 # ---------------------------------------------------------------- signal files

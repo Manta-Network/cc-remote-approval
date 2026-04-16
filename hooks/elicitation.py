@@ -150,7 +150,8 @@ def _child_run(cfg, server_name, message, fields,
         return
 
     # Send form immediately
-    text, buttons = _build_form_message(message, fields)
+    timeout = cfg.get("elicitation_timeout")
+    text, buttons = _build_form_message(message, fields, timeout=timeout)
     try:
         msg_id = ch.send_message(text, buttons=buttons)
         _log(f"Sent form msg_id={msg_id}")
@@ -196,7 +197,7 @@ def _child_run(cfg, server_name, message, fields,
                                 form_data[field["name"]] = field["enum"][ei]
                         elif ftype == "b":
                             form_data[field["name"]] = val == "1"
-                        _update_form(ch, msg_id, message, fields, form_data)
+                        _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
 
             elif data == "submit":
                 # Block submit if any required field is still empty.
@@ -204,7 +205,7 @@ def _child_run(cfg, server_name, message, fields,
                            if f.get("required") and f["name"] not in form_data]
                 if missing:
                     _log(f"Submit blocked — missing required: {missing}")
-                    _update_form(ch, msg_id, message, fields, form_data)
+                    _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
                     continue
                 _log(f"Submit: {form_data}")
                 ch.edit_message(msg_id, "✅ <b>Form submitted</b>", buttons=[])
@@ -237,7 +238,7 @@ def _child_run(cfg, server_name, message, fields,
                         continue  # bad input, try next field or wait
                 else:
                     continue
-                _update_form(ch, msg_id, message, fields, form_data)
+                _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
                 break
 
 
@@ -350,12 +351,15 @@ def _build_field_buttons(fields, skip_filled=None):
     return buttons
 
 
-def _build_form_message(message, fields):
+def _build_form_message(message, fields, timeout=None):
     # Truncate cleanly at a paragraph/line/word boundary before HTML-escaping
     # so the final message stays under TG's 4096-char limit even when the
     # MCP server sends a very long elicitation prompt.
     message = smart_truncate(message or "", 2000, marker="\n\n…truncated")
-    text = f"📋 <b>Form</b>\n\n{html_escape(message)}\n"
+    text = f"📋 <b>Form</b>\n"
+    if timeout:
+        text += f"⏳ Respond within {timeout}s, or it will fall back to local form\n"
+    text += f"\n{html_escape(message)}\n"
     # Fields that need text input (no buttons): string, integer, number.
     _TEXT_INPUT_TYPES = {"string", "integer", "number"}
     for f in fields:
@@ -365,9 +369,12 @@ def _build_form_message(message, fields):
     return text, _build_field_buttons(fields)
 
 
-def _update_form(ch, msg_id, message, fields, form_data):
+def _update_form(ch, msg_id, message, fields, form_data, timeout=None):
     message = smart_truncate(message or "", 2000, marker="\n\n…truncated")
-    text = f"📋 <b>Form</b>\n\n{html_escape(message)}\n"
+    text = f"📋 <b>Form</b>\n"
+    if timeout:
+        text += f"⏳ Respond within {timeout}s, or it will fall back to local form\n"
+    text += f"\n{html_escape(message)}\n"
     for f in fields:
         name, title = f["name"], f["title"]
         if name in form_data:

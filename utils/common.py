@@ -26,7 +26,6 @@ DEFAULTS = {
     "context_turns": 3,
     "context_max_chars": 200,
     "stop_hook_enabled": True,
-    "stop_wait_seconds": 180,
     "session_hint_enabled": True,
 }
 

@@ -17,7 +17,7 @@ Claude finishes task → Stop hook fires
       {context}
       [✏️ Continue]  [❌ Dismiss]
 
-  → Poll TG for response (up to stop_wait_seconds, default 180s):
+  → Poll TG for response (up to POLL_TIMEOUT_SECONDS):
 
     A) User clicks "✏️ Continue"
        → Send ForceReply prompt: "Reply with your next instruction"
@@ -32,7 +32,7 @@ Claude finishes task → Stop hook fires
        → Return empty (allow idle)
        → Write signal file to dedup with Notification hook
 
-    C) Timeout (stop_wait_seconds)
+    C) Timeout (POLL_TIMEOUT_SECONDS)
        → Edit message: "💤 Timed out"
        → Return empty (allow idle)
        → Write signal file to dedup with Notification hook
@@ -62,7 +62,7 @@ Contains a timestamp. `notification.py` checks this file — if it exists and wa
 New field in `config.json`:
 ```json
 {
-  "stop_wait_seconds": 180
+  "stop_hook_enabled": true
 }
 ```
 

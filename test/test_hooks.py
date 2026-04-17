@@ -1282,7 +1282,7 @@ class TestStopHookContinueFlow:
     def _make_cfg(self):
         return {
             "bot_token": "tok", "chat_id": "123",
-            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "stop_hook_enabled": True,
             "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         }
@@ -1392,7 +1392,7 @@ class TestStopHookLocalResponse:
         monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
         monkeypatch.setattr(stop_mod, "load_config", lambda: {
             "bot_token": "tok", "chat_id": "123",
-            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "stop_hook_enabled": True,
             "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         })
@@ -1477,6 +1477,3 @@ class TestStopHookConfig:
         from utils.common import DEFAULTS
         assert DEFAULTS["stop_hook_enabled"] is True
 
-    def test_default_wait_seconds(self):
-        from utils.common import DEFAULTS
-        assert DEFAULTS["stop_wait_seconds"] == 180

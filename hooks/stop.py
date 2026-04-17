@@ -4,7 +4,7 @@ Stop hook — intercept Claude before idle, offer remote prompt injection.
 
 When Claude finishes a task and is about to stop:
 1. Send Telegram message with "Continue" / "Dismiss" buttons
-2. Poll for user response (up to stop_wait_seconds)
+2. Poll for user response (up to POLL_TIMEOUT_SECONDS)
 3. If user sends a new instruction → block stop, inject as additionalContext
 4. If user dismisses or timeout → allow stop (Claude goes idle)
 
@@ -18,7 +18,8 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          check_local_response, STOP_SIGNAL_DIR)
+                          check_local_response, STOP_SIGNAL_DIR,
+                          POLL_TIMEOUT_SECONDS)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -44,11 +45,6 @@ def main():
     ch, ch_err = create_channel(cfg)
     if not ch:
         _log(f"Channel unavailable: {ch_err}")
-        sys.exit(0)
-
-    wait_seconds = cfg.get("stop_wait_seconds", 180)
-    if wait_seconds <= 0:
-        _log("stop_wait_seconds <= 0, skipping")
         sys.exit(0)
 
     session_id = event.get("session_id", "")
@@ -94,7 +90,7 @@ def main():
         except OSError:
             pass
 
-    deadline = time.monotonic() + wait_seconds
+    deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         # Race: if user types in terminal, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):
@@ -157,8 +153,8 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    # Timeout — no one responded on TG or terminal within stop_wait_seconds
-    _log(f"Timeout after {wait_seconds}s")
+    # Timeout — no one responded on TG or terminal
+    _log("Timeout")
     ch.edit_message(msg_id, text=_status_text("💤 Timed out", session_tag), buttons=[])
     _cleanup_prompts(ch, prompt_ids)
     _write_signal(session_id)

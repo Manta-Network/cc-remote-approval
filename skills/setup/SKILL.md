@@ -49,7 +49,6 @@ cat > ~/.cc-remote-approval/config.json << 'CONF'
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
   "stop_hook_enabled": true,
-  "stop_wait_seconds": 180,
   "context_turns": 3,
   "context_max_chars": 200,
   "session_hint_enabled": true
@@ -86,5 +85,4 @@ curl -s -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 | `context_turns` | 3 | Number of conversation turns to show in context |
 | `context_max_chars` | 200 | Max chars per context turn |
 | `stop_hook_enabled` | `true` | Enable Stop hook for remote task continuation. Set `false` to disable. |
-| `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle (local terminal input releases immediately) |
 | `session_hint_enabled` | `true` | Inject SessionStart hint steering Claude to prefer AskUserQuestion tool for option-picking. Set `false` to disable. |

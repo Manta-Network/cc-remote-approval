@@ -67,8 +67,7 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
   "chat_id": "你的 chat ID",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
-  "stop_hook_enabled": true,
-  "stop_wait_seconds": 180
+  "stop_hook_enabled": true
 }
 ```
 
@@ -95,7 +94,6 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | \
 | `escalation_seconds` | 20 | 本地无操作多久后发到消息渠道 |
 | `elicitation_timeout` | 60 | MCP 表单超时后回退到本地 form |
 | `stop_hook_enabled` | `true` | 启用 Stop hook 远程续任务，设 `false` 禁用 |
-| `stop_wait_seconds` | 180 | 等待远程指令的超时秒数（本地终端输入会立即释放） |
 | `context_turns` | 3 | 消息里显示几轮对话上下文 |
 | `context_max_chars` | 200 | 每轮上下文最大字符数 |
 

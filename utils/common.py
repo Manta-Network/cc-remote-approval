@@ -223,12 +223,11 @@ def format_context_lines(transcript_path, max_turns=3, max_chars=200):
             text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
             text = re.sub(r'^\|.*\|$', '', text, flags=re.MULTILINE)
             text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-            text = re.sub(r'\n{2,}', '\n', text)
-            # Take first meaningful line
-            text_lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
-            text = text_lines[0] if text_lines else ""
-            if not text or len(text) < 3:
-                continue
+        # Collapse whitespace (newlines, tabs, repeated spaces) to single
+        # spaces so each context line renders as a clean one-liner.
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text or len(text) < 3:
+            continue
         lines.append(f"{time_label}{prefix} {html_escape(mask_secrets(text))}")
     return lines
 

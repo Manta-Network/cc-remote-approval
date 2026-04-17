@@ -426,6 +426,24 @@ class TestExtractContext:
         assert "no time" in result[0]
         assert "[" not in result[0]  # no time bracket when timestamp missing
 
+    def test_flattens_multiline_content_to_single_line(self, tmp_path):
+        """Multi-line user input should render as a clean one-liner in
+        channel context previews — collapse newlines + repeated whitespace
+        to single spaces."""
+        from utils.common import format_context_lines
+        transcript = tmp_path / "t.jsonl"
+        multiline = "line one\n\nline two\n\tindented line three"
+        transcript.write_text(json.dumps(
+            {"message": {"role": "user", "content": multiline}}
+        ))
+        result = format_context_lines(str(transcript))
+        assert len(result) == 1
+        # No newlines or tabs in the rendered line
+        assert "\n" not in result[0]
+        assert "\t" not in result[0]
+        # All three segments are present, joined by single spaces
+        assert "line one line two indented line three" in result[0]
+
 
 # --- edit_message_resolved ---
 

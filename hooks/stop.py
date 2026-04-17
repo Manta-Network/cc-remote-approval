@@ -18,8 +18,7 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          check_local_response, STOP_SIGNAL_DIR,
-                          POLL_TIMEOUT_SECONDS)
+                          check_local_response, STOP_SIGNAL_DIR)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -42,6 +41,11 @@ def main():
         _log("Stop hook disabled (stop_hook_enabled=false)")
         sys.exit(0)
 
+    wait_seconds = cfg.get("stop_wait_seconds", 180)
+    if wait_seconds <= 0:
+        _log("stop_wait_seconds <= 0, skipping")
+        sys.exit(0)
+
     ch, ch_err = create_channel(cfg)
     if not ch:
         _log(f"Channel unavailable: {ch_err}")
@@ -61,7 +65,7 @@ def main():
     session_tag = _session_tag(event)
     if session_tag:
         text += f" · <code>{html_escape(session_tag)}</code>"
-    text += "\n\nReply with a new task, or dismiss."
+    text += f"\n\n⏳ Reply within {wait_seconds}s, or Claude will idle."
     text += format_context_block(context_lines)
 
     buttons = [
@@ -90,7 +94,7 @@ def main():
         except OSError:
             pass
 
-    deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+    deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         # Race: if user types in terminal, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):

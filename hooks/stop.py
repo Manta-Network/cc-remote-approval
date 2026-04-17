@@ -97,8 +97,8 @@ def main():
                 _log("User clicked Continue")
                 ch.edit_message(msg_id, text=_status_text("⏳ Waiting for instruction...", session_tag), buttons=[])
                 prompt_msg_id = ch.send_reply_prompt(
+                    msg_id,
                     "💬 Reply with your next instruction:",
-                    reply_to=msg_id,
                 )
                 if prompt_msg_id:
                     prompt_ids.append(prompt_msg_id)

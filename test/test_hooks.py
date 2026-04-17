@@ -1257,6 +1257,117 @@ class TestStopHookButtons:
         assert "stop:dismiss" in data_values
 
 
+class _PollableFakeChannel(FakeChannel):
+    """FakeChannel with a simple poll queue for Stop hook integration tests."""
+
+    def __init__(self):
+        super().__init__()
+        self._poll_queue = []
+
+    def poll(self, msg_id):
+        if self._poll_queue:
+            return self._poll_queue.pop(0)
+        return None
+
+
+class TestStopHookContinueFlow:
+    """Exercise the Continue button → ForceReply → text reply → block path."""
+
+    def _make_cfg(self):
+        return {
+            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 180,
+            "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
+            "channel_type": "telegram",
+        }
+
+    def test_continue_then_text_reply_blocks_stop(self, monkeypatch, tmp_path):
+        """Click Continue → send_reply_prompt → user types instruction → block."""
+        import hooks.stop as stop_mod
+        import io
+
+        ch = _PollableFakeChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "text", "text": "fix the login bug"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+
+        stdin = io.StringIO('{"cwd": "/home/user/my-project"}')
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", stdin)
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+
+        output = json.loads(stdout.getvalue())
+        assert output["decision"] == "block"
+        assert "fix the login bug" in output["hookSpecificOutput"]["additionalContext"]
+
+    def test_continue_calls_send_reply_prompt_correctly(self, monkeypatch, tmp_path):
+        """Verify send_reply_prompt is called with (msg_id, text) not (text, reply_to=msg_id)."""
+        import hooks.stop as stop_mod
+        import io
+
+        calls = []
+        class SpyChannel(_PollableFakeChannel):
+            def send_reply_prompt(self, msg_id, text, force_reply=True):
+                calls.append({"msg_id": msg_id, "text": text, "force_reply": force_reply})
+                return super().send_reply_prompt(msg_id, text, force_reply)
+
+        ch = SpyChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "text", "text": "next task"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+        monkeypatch.setattr("sys.stdin", io.StringIO('{}'))
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+
+        with pytest.raises(SystemExit):
+            stop_mod.main()
+
+        assert len(calls) == 1
+        assert isinstance(calls[0]["msg_id"], int)
+        assert "instruction" in calls[0]["text"].lower()
+
+    def test_dismiss_allows_idle(self, monkeypatch, tmp_path):
+        """Click Dismiss → allow idle, write signal file."""
+        import hooks.stop as stop_mod
+        import io
+
+        ch = _PollableFakeChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:dismiss"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", io.StringIO('{}'))
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+        # No block decision — stdout should be empty
+        assert stdout.getvalue() == ""
+        # Signal file should be written
+        assert os.path.exists(os.path.join(str(tmp_path), "handled"))
+
+
 class TestStopHookAdditionalContext:
     """The additionalContext format for injecting instructions."""
 

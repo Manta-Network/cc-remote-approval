@@ -6,7 +6,7 @@ When Claude finishes a task and goes idle, the user must return to the terminal 
 
 ## Solution
 
-Add a **Stop hook** that intercepts Claude before it goes idle, sends an interactive message to Telegram with "Continue" and "Dismiss" buttons, and polls for a reply. If the user sends a new instruction via Telegram, the hook blocks the stop and injects the instruction as `additionalContext`, causing Claude to continue working.
+Add a **Stop hook** that intercepts Claude before it goes idle, sends an interactive message to Telegram with "Continue" and "Dismiss" buttons, and polls for a reply. If the user sends a new instruction via Telegram, the hook blocks the stop and passes the instruction via the `reason` field (Stop hook schema doesn't support `hookSpecificOutput.additionalContext`), causing Claude to continue working.
 
 ## Flow
 
@@ -24,7 +24,7 @@ Claude finishes task → Stop hook fires
        → Wait for text reply
        → User sends "fix the login bug"
        → Edit message: "✅ New task sent: fix the login bug"
-       → Return {decision: "block", additionalContext: "..."}
+       → Return {decision: "block", reason: "..."}
        → Claude continues with new instruction
 
     B) User clicks "❌ Dismiss"
@@ -86,15 +86,12 @@ New field in `config.json`:
 | ✏️ Continue | `stop:continue` | Send ForceReply, wait for text, block stop |
 | ❌ Dismiss | `stop:dismiss` | Allow idle, write signal file |
 
-## additionalContext Format
+## `reason` Format
 
-```xml
-<cc-remote-approval>
-The user sent a new instruction via the remote messaging channel (Telegram).
-Please execute this instruction:
+The Stop hook schema only supports `decision` + `reason` at the top level (not `hookSpecificOutput.additionalContext`, which is for PreToolUse/UserPromptSubmit/PostToolUse). The `reason` string is shown to Claude as the continuation directive:
 
-{user_message}
-</cc-remote-approval>
+```
+The user sent a new instruction via the remote messaging channel (Telegram). Please execute this instruction: {user_message}
 ```
 
 ## Message States
@@ -120,4 +117,4 @@ Please execute this instruction:
 - Signal file write/read for Notification dedup
 - Signal file TTL (stale files ignored)
 - Channel unavailable → exit silently
-- additionalContext format validation
+- Block decision uses `reason` field (not `hookSpecificOutput` — schema rejects it for Stop)

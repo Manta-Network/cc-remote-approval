@@ -102,9 +102,12 @@ def main():
         ch.edit_message(msg_id, text=_status_text(status, session_tag, context_lines), buttons=[])
         _cleanup_prompts(ch, prompt_ids)
 
+    def local_response():
+        return transcript_path and check_local_response(transcript_path, poll_start_size)
+
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        if transcript_path and check_local_response(transcript_path, poll_start_size):
+        if local_response():
             _log("User responded locally, releasing stop")
             resolve("🖥️ Handled locally")
             sys.exit(0)
@@ -113,6 +116,12 @@ def main():
         if update is None:
             time.sleep(1)
             continue
+
+        # Close TOCTOU: local action may have happened in parallel with poll.
+        if local_response():
+            _log("User responded locally (parallel with callback), releasing stop")
+            resolve("🖥️ Handled locally")
+            sys.exit(0)
 
         if update["type"] == "callback":
             data = update["data"]

@@ -128,13 +128,19 @@ def main():
 
             if data == "stop:continue":
                 _log("User clicked Continue")
-                ch.edit_message(msg_id, text=_status_text("⏳ Waiting for instruction...", session_tag), buttons=[])
+                # Send the ForceReply prompt FIRST so we only commit to the
+                # transition if it succeeds. On failure, leave the original
+                # Continue/Dismiss buttons intact so the user can retry or
+                # dismiss instead of being stranded.
                 prompt_msg_id = ch.send_reply_prompt(
                     msg_id,
                     "💬 Reply with your next instruction:",
                 )
-                if prompt_msg_id:
-                    prompt_ids.append(prompt_msg_id)
+                if not prompt_msg_id:
+                    _log("send_reply_prompt failed; keeping original buttons")
+                    continue
+                prompt_ids.append(prompt_msg_id)
+                ch.edit_message(msg_id, text=_status_text("⏳ Waiting for instruction...", session_tag), buttons=[])
                 continue
 
             elif data == "stop:dismiss":

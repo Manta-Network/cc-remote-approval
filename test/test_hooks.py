@@ -1444,6 +1444,46 @@ class TestStopHookContinueFlow:
         assert isinstance(calls[0]["msg_id"], int)
         assert "instruction" in calls[0]["text"].lower()
 
+    def test_continue_prompt_send_failure_keeps_buttons(self, monkeypatch, tmp_path):
+        """If send_reply_prompt fails, original Continue/Dismiss buttons must
+        stay so the user can retry or dismiss — not be stranded waiting."""
+        import hooks.stop as stop_mod
+        import io
+
+        edits = []
+        class FailingPromptChannel(_PollableFakeChannel):
+            def send_reply_prompt(self, msg_id, text, force_reply=True):
+                return None  # simulate transport failure
+            def edit_message(self, msg_id, text, buttons=None, parse_mode="HTML"):
+                edits.append({"text": text, "buttons": buttons})
+                super().edit_message(msg_id, text, buttons, parse_mode)
+
+        ch = FailingPromptChannel()
+        # After Continue fails, user clicks Dismiss on the still-present buttons
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "callback", "data": "stop:dismiss"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "sess-retry"}'))
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+
+        with pytest.raises(SystemExit):
+            stop_mod.main()
+
+        # No edit should have transitioned to "Waiting for instruction..."
+        # because the prompt send failed.
+        waiting_edits = [e for e in edits if "Waiting for instruction" in e["text"]]
+        assert not waiting_edits, \
+            "Continue path edited to 'Waiting' despite send_reply_prompt failing"
+        # Dismiss must have resolved normally (edit happened for Dismissed).
+        dismiss_edits = [e for e in edits if "Dismissed" in e["text"]]
+        assert dismiss_edits, "Dismiss flow should still work after failed Continue"
+
     def test_dismiss_allows_idle(self, monkeypatch, tmp_path):
         """Click Dismiss → allow idle, write signal file."""
         import hooks.stop as stop_mod

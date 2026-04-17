@@ -1,11 +1,17 @@
 {
   "name": "cc-remote-approval",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Control Claude Code remotely via Telegram — approve permissions, fill forms, and send new tasks on the go",
   "author": {
     "name": "Manta Network"
   },
   "repository": "https://github.com/Manta-Network/cc-remote-approval",
   "license": "MIT",
-  "keywords": ["telegram", "hooks", "remote", "notifications", "mobile"]
+  "keywords": [
+    "telegram",
+    "hooks",
+    "remote",
+    "notifications",
+    "mobile"
+  ]
 }

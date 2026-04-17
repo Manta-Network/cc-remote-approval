@@ -1245,17 +1245,21 @@ class TestStopHookStatusText:
         assert "code>" not in result
 
 
-class TestStopHookSessionTag:
-    """_session_tag helper."""
+class TestSessionTag:
+    """Shared session_tag helper in utils.common."""
 
     def test_extracts_basename(self):
-        from hooks.stop import _session_tag
-        assert _session_tag({"cwd": "/home/user/my-project"}) == "my-project"
+        from utils.common import session_tag
+        assert session_tag({"cwd": "/home/user/my-project"}) == "my-project"
 
     def test_empty_cwd(self):
-        from hooks.stop import _session_tag
-        assert _session_tag({"cwd": ""}) is None
-        assert _session_tag({}) is None
+        from utils.common import session_tag
+        assert session_tag({"cwd": ""}) == ""
+        assert session_tag({}) == ""
+
+    def test_trailing_slash_stripped(self):
+        from utils.common import session_tag
+        assert session_tag({"cwd": "/home/user/repo/"}) == "repo"
 
 
 class TestStopHookButtons:

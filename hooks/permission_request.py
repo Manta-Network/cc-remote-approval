@@ -11,7 +11,8 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger,
                      mask_secrets, check_local_response, format_context_lines,
-                     format_context_block, smart_truncate, POLL_TIMEOUT_SECONDS)
+                     format_context_block, smart_truncate, POLL_TIMEOUT_SECONDS,
+                     session_tag as common_session_tag)
 from utils.channel import create_channel
 
 _log = make_logger("permission_request")
@@ -344,9 +345,7 @@ def main():
     tool_input = event.get("tool_input", {})
     transcript_path = event.get("transcript_path", "")
     tool_display = format_tool_display(tool_name, tool_input)
-    # Short project identifier for the TG reader — multiple CC sessions
-    # sharing one chat benefit from knowing which repo asked.
-    session_tag = os.path.basename((event.get("cwd") or "").rstrip("/"))
+    session_tag = common_session_tag(event)
 
     state["ch"] = ch
     state["tool_name"] = tool_name

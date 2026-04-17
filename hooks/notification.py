@@ -19,7 +19,9 @@ import os
 import sys
 
 from utils.common import (load_config, html_escape, make_logger,
-                          format_context_lines, format_context_block)
+                          format_context_lines, format_context_block,
+                          session_tag as common_session_tag)
+from hooks.stop import check_stop_signal
 from utils.channel import create_channel
 
 _log = make_logger("notification")
@@ -57,7 +59,6 @@ def main():
     # plain notification so the user doesn't see two "idle" messages.
     # Scoped by session_id so concurrent sessions don't interfere.
     if notification_type == "idle_prompt":
-        from hooks.stop import check_stop_signal
         session_id = event.get("session_id", "")
         if check_stop_signal(session_id):
             _log("Stop hook recently handled idle, skipping duplicate notification")
@@ -71,24 +72,12 @@ def main():
     )
 
     text = MESSAGES[notification_type]
-    # Session tag — when multiple CC sessions share one TG chat this tells
-    # the user which project the notification is from.
-    session_tag = _session_tag(event)
-    if session_tag:
-        text = text.replace("</b>", f"</b> · <code>{html_escape(session_tag)}</code>", 1)
+    tag = common_session_tag(event)
+    if tag:
+        text = text.replace("</b>", f"</b> · <code>{html_escape(tag)}</code>", 1)
     text += format_context_block(context_lines)
 
     ch.send_notification(text)
-
-
-def _session_tag(event):
-    """Short label identifying the originating session for the TG reader.
-    Picks cwd basename (e.g. 'cc-remote-approval') — short, human, and
-    unique enough when the user runs one session per repo."""
-    cwd = event.get("cwd") or ""
-    if cwd:
-        return os.path.basename(cwd.rstrip("/")) or None
-    return None
 
 
 if __name__ == "__main__":

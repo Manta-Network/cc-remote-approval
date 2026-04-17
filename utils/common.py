@@ -97,6 +97,13 @@ def sanitize_name(name):
     return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:100]
 
 
+def session_tag(event):
+    """Short project identifier from event cwd basename — helps readers
+    tell multiple CC sessions apart when they share one TG chat."""
+    cwd = event.get("cwd") or ""
+    return os.path.basename(cwd.rstrip("/"))
+
+
 # Patterns that look like secrets — matched case-insensitively
 _SECRET_PATTERNS = [
     # Key=value patterns: TOKEN=xxx, password=xxx, secret=xxx, etc.

@@ -24,7 +24,8 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          check_local_response, STOP_SIGNAL_DIR)
+                          check_local_response, STOP_SIGNAL_DIR,
+                          session_tag as common_session_tag)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -67,8 +68,8 @@ def main():
         max_chars=cfg["context_max_chars"],
     )
 
-    text = f"💤 <b>Agent idle</b>"
-    session_tag = _session_tag(event)
+    session_tag = common_session_tag(event)
+    text = "💤 <b>Agent idle</b>"
     if session_tag:
         text += f" · <code>{html_escape(session_tag)}</code>"
     text += f"\n\n⏳ Tap Continue within {wait_seconds}s, or Claude Code will idle."
@@ -85,12 +86,11 @@ def main():
         msg_id = ch.send_message(text, buttons=buttons)
         _log(f"Sent stop message msg_id={msg_id}")
     except Exception as e:
-        _log(f"Send failed: {e}")
+        _log(f"SEND FAILED: {e}")
         sys.exit(0)
 
     prompt_ids = []
 
-    # Baseline transcript size for local response detection
     poll_start_size = 0
     if transcript_path:
         try:
@@ -98,16 +98,18 @@ def main():
         except OSError:
             pass
 
+    def resolve(status):
+        ch.edit_message(msg_id, text=_status_text(status, session_tag, context_lines), buttons=[])
+        _cleanup_prompts(ch, prompt_ids)
+
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        # Race: if user types in Claude Code, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):
             _log("User responded locally, releasing stop")
-            ch.edit_message(msg_id, text=_status_text("🖥️ Handled locally", session_tag, context_lines), buttons=[])
-            _cleanup_prompts(ch, prompt_ids)
+            resolve("🖥️ Handled locally")
             sys.exit(0)
 
-        update = ch.poll(msg_id if not prompt_ids else [msg_id] + prompt_ids)
+        update = ch.poll([msg_id, *prompt_ids])
         if update is None:
             time.sleep(1)
             continue
@@ -128,8 +130,7 @@ def main():
 
             elif data == "stop:dismiss":
                 _log("User clicked Dismiss")
-                ch.edit_message(msg_id, text=_status_text("❌ Dismissed", session_tag, context_lines), buttons=[])
-                _cleanup_prompts(ch, prompt_ids)
+                resolve("❌ Dismissed")
                 _write_signal(session_id)
                 sys.exit(0)
 
@@ -137,15 +138,10 @@ def main():
             instruction = update["text"].strip()
             if not instruction:
                 continue
-            _log(f"Received instruction: {instruction[:200]}")
-            ch.edit_message(
-                msg_id,
-                text=_status_text(f"✅ New task sent: <code>{html_escape(mask_secrets(instruction[:200]))}</code>", session_tag, context_lines),
-                buttons=[],
-            )
-            _cleanup_prompts(ch, prompt_ids)
-            # Block stop, inject instruction via `reason` (Stop hook schema
-            # doesn't support hookSpecificOutput.additionalContext).
+            masked = mask_secrets(instruction[:200])
+            _log(f"Received instruction: {masked}")
+            resolve(f"✅ New task sent: <code>{html_escape(masked)}</code>")
+            # Block stop, inject instruction via `reason` field.
             json.dump({
                 "decision": "block",
                 "reason": (
@@ -156,20 +152,10 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    # Timeout — no one responded on TG or locally
     _log("Timeout")
-    ch.edit_message(msg_id, text=_status_text("⏰ Timed out", session_tag, context_lines), buttons=[])
-    _cleanup_prompts(ch, prompt_ids)
+    resolve("⏰ Timed out")
     _write_signal(session_id)
     sys.exit(0)
-
-
-def _session_tag(event):
-    """Short label identifying the session (project name)."""
-    cwd = event.get("cwd") or ""
-    if cwd:
-        return os.path.basename(cwd.rstrip("/")) or None
-    return None
 
 
 def _status_text(status, session_tag=None, context_lines=None):

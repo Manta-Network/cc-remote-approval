@@ -289,3 +289,36 @@ class TestExtractLastMessages:
 
     def test_returns_empty_for_empty_path(self):
         assert extract_last_messages("") == []
+
+    def test_strips_system_tags_from_user_messages(self, tmp_path):
+        """Slash-command invocations and local-command caveats are system
+        plumbing; they shouldn't leak into channel context previews."""
+        transcript = tmp_path / "t.jsonl"
+        wrapped = (
+            "<command-name>/reload-plugins</command-name>\n"
+            "<command-message>reload-plugins</command-message>\n"
+            "<command-args></command-args>\n"
+            "切换到 main 分支吧？"
+        )
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": wrapped}
+        }))
+        msgs = extract_last_messages(str(transcript))
+        assert len(msgs) == 1
+        assert "切换到 main 分支吧？" in msgs[0]["text"]
+        assert "command-name" not in msgs[0]["text"]
+        assert "reload-plugins" not in msgs[0]["text"]
+
+    def test_skips_message_that_is_only_system_tags(self, tmp_path):
+        """If a user message is nothing but tagged plumbing, skip it
+        entirely rather than showing an empty line."""
+        transcript = tmp_path / "t.jsonl"
+        lines = [
+            json.dumps({"message": {"role": "user", "content":
+                "<system-reminder>Reminder: do X</system-reminder>"}}),
+            json.dumps({"message": {"role": "user", "content": "real instruction"}}),
+        ]
+        transcript.write_text("\n".join(lines))
+        msgs = extract_last_messages(str(transcript))
+        assert len(msgs) == 1
+        assert msgs[0]["text"] == "real instruction"

@@ -99,8 +99,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
   "chat_id": "Your chat ID",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
-  "stop_wait_seconds": 180,
-  "stop_hook_enabled": false,
+  "stop_hook_enabled": true,
   "context_turns": 3,
   "context_max_chars": 200,
   "session_hint_enabled": true

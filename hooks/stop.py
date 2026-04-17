@@ -18,7 +18,8 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          check_local_response, STOP_SIGNAL_DIR)
+                          check_local_response, STOP_SIGNAL_DIR,
+                          POLL_TIMEOUT_SECONDS)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -46,11 +47,6 @@ def main():
         _log(f"Channel unavailable: {ch_err}")
         sys.exit(0)
 
-    wait_seconds = cfg["stop_wait_seconds"]
-    if not wait_seconds or wait_seconds <= 0:
-        _log("stop_wait_seconds <= 0, skipping")
-        sys.exit(0)
-
     # Build idle message
     transcript_path = event.get("transcript_path", "")
     context_lines = format_context_lines(
@@ -63,7 +59,7 @@ def main():
     session_tag = _session_tag(event)
     if session_tag:
         text += f" · <code>{html_escape(session_tag)}</code>"
-    text += f"\n\n⏳ Waiting {wait_seconds}s for new instruction..."
+    text += "\n\nReply with a new task, or dismiss."
     text += format_context_block(context_lines)
 
     buttons = [
@@ -92,7 +88,7 @@ def main():
         except OSError:
             pass
 
-    deadline = time.monotonic() + wait_seconds
+    deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         # Race: if user types in terminal, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):
@@ -155,8 +151,8 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    # Timeout
-    _log(f"Timeout after {wait_seconds}s")
+    # Timeout (should rarely happen — 3 day poll timeout)
+    _log("Poll timeout reached")
     ch.edit_message(msg_id, text=_status_text("💤 Timed out", session_tag), buttons=[])
     _cleanup_prompts(ch, prompt_ids)
     _write_signal()

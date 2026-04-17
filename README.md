@@ -69,8 +69,7 @@ Manual config:
   "chat_id": "your-chat-id",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
-  "stop_wait_seconds": 180,
-  "stop_hook_enabled": false,
+  "stop_hook_enabled": true,
   "session_hint_enabled": true
 }
 ```
@@ -99,8 +98,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | \
 | `elicitation_timeout` | 60 | Seconds before falling back to local form for MCP elicitations |
 | `context_turns` | 3 | Conversation turns shown in message context |
 | `context_max_chars` | 200 | Max chars per context turn |
-| `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle |
-| `stop_hook_enabled` | `false` | Enable Stop hook for remote task continuation. Set `true` to allow sending new instructions from channel when idle. |
+| `stop_hook_enabled` | `true` | Enable Stop hook for remote task continuation. Set `false` to disable. |
 | `session_hint_enabled` | `true` | Inject SessionStart hint that steers Claude to prefer `AskUserQuestion` tool for option-picking (renders as buttons on channel). Set `false` to let Claude use its natural behavior. |
 
 All values are configurable. You can also override any config field via environment variable with the `CC_REMOTE_APPROVAL_` prefix (e.g., `CC_REMOTE_APPROVAL_SESSION_HINT_ENABLED=false`).

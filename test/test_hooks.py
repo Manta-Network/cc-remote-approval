@@ -1275,7 +1275,7 @@ class TestStopHookContinueFlow:
 
     def _make_cfg(self):
         return {
-            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 180,
+            "bot_token": "tok", "chat_id": "123",
             "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         }
@@ -1384,7 +1384,7 @@ class TestStopHookLocalResponse:
 
         monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
         monkeypatch.setattr(stop_mod, "load_config", lambda: {
-            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 180,
+            "bot_token": "tok", "chat_id": "123",
             "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         })
@@ -1452,7 +1452,7 @@ class TestStopHookNoChannel:
         from utils.channel import ChannelError
         monkeypatch.setattr(ch_mod, "create_channel", lambda cfg: (None, ChannelError("test")))
         monkeypatch.setattr(stop_mod, "load_config", lambda: {
-            "bot_token": "", "chat_id": "", "stop_wait_seconds": 180,
+            "bot_token": "", "chat_id": "",
             "context_turns": 3, "context_max_chars": 200,
             "channel_type": "telegram",
         })
@@ -1463,24 +1463,9 @@ class TestStopHookNoChannel:
 
 
 class TestStopHookConfig:
-    """stop_wait_seconds config handling."""
+    """stop_hook_enabled config handling."""
 
-    def test_default_in_config(self):
+    def test_default_enabled(self):
         from utils.common import DEFAULTS
-        assert "stop_wait_seconds" in DEFAULTS
-        assert DEFAULTS["stop_wait_seconds"] == 180
-
-    def test_zero_wait_exits(self, monkeypatch):
-        """stop_wait_seconds=0 should skip the stop hook."""
-        import hooks.stop as stop_mod
-        import utils.channel as ch_mod
-        monkeypatch.setattr(ch_mod, "create_channel", lambda cfg: (FakeChannel(), None))
-        monkeypatch.setattr(stop_mod, "load_config", lambda: {
-            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 0,
-            "context_turns": 3, "context_max_chars": 200,
-            "channel_type": "telegram",
-        })
-        monkeypatch.setattr("sys.stdin", __import__("io").StringIO('{}'))
-        with pytest.raises(SystemExit) as exc:
-            stop_mod.main()
-        assert exc.value.code == 0
+        assert "stop_hook_enabled" in DEFAULTS
+        assert DEFAULTS["stop_hook_enabled"] is True

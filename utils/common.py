@@ -25,8 +25,7 @@ DEFAULTS = {
     "elicitation_timeout": 60,
     "context_turns": 3,
     "context_max_chars": 200,
-    "stop_wait_seconds": 180,
-    "stop_hook_enabled": False,
+    "stop_hook_enabled": True,
     "session_hint_enabled": True,
 }
 

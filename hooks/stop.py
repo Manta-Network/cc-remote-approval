@@ -64,7 +64,7 @@ def main():
     transcript_path = event.get("transcript_path", "")
     context_lines = format_context_lines(
         transcript_path,
-        max_turns=1,
+        max_turns=cfg["context_turns"],
         max_chars=cfg["context_max_chars"],
     )
 

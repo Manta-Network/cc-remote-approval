@@ -143,12 +143,12 @@ def check_local_response(transcript_path, baseline_size, threshold=200):
 
 # Claude Code wraps slash commands, local caveats, and system reminders
 # in XML-style tags inside user messages. These aren't real user intent
-# and shouldn't show up in context previews on the channel side.
+# and shouldn't show up in context previews on the channel side. Covers
+# any `<command-*>`, `<local-command-*>`, or `<system-*>` tag.
+_SYSTEM_TAG_NAME = r"(?:(?:local-)?command-[a-z-]+|system-[a-z-]+)"
 _SYSTEM_TAG_BLOCK = re.compile(
-    r"<(system-reminder|local-command-caveat|command-name|command-message|command-args|command-stdout)[^>]*>"
-    r".*?</\1>|"
-    r"<(system-reminder|local-command-caveat|command-name|command-message|command-args|command-stdout)[^>]*>",
-    re.DOTALL,
+    rf"<({_SYSTEM_TAG_NAME})\b[^>]*>.*?</\1>|<{_SYSTEM_TAG_NAME}\b[^>]*/?>",
+    re.DOTALL | re.IGNORECASE,
 )
 
 

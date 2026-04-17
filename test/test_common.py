@@ -309,6 +309,25 @@ class TestExtractLastMessages:
         assert "command-name" not in msgs[0]["text"]
         assert "reload-plugins" not in msgs[0]["text"]
 
+    def test_strips_local_command_stdout_and_other_variants(self, tmp_path):
+        """Pattern should catch any <(local-)command-*> and <system-*> tag,
+        not just the hardcoded short list."""
+        transcript = tmp_path / "t.jsonl"
+        wrapped = (
+            "<local-command-stdout>(no content)</local-command-stdout>\n"
+            "<system-session-start>Injected preamble</system-session-start>\n"
+            "怎么还有标签？"
+        )
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": wrapped}
+        }))
+        msgs = extract_last_messages(str(transcript))
+        assert len(msgs) == 1
+        assert "怎么还有标签？" in msgs[0]["text"]
+        assert "local-command-stdout" not in msgs[0]["text"]
+        assert "(no content)" not in msgs[0]["text"]
+        assert "system-session-start" not in msgs[0]["text"]
+
     def test_skips_message_that_is_only_system_tags(self, tmp_path):
         """If a user message is nothing but tagged plumbing, skip it
         entirely rather than showing an empty line."""

@@ -141,20 +141,16 @@ def check_local_response(transcript_path, baseline_size, threshold=200):
 
 
 
-# Claude Code wraps slash commands, local caveats, and system reminders
-# in XML-style tags inside user messages. These aren't real user intent
-# and shouldn't show up in context previews on the channel side. Covers
-# any `<command-*>`, `<local-command-*>`, or `<system-*>` tag.
-_SYSTEM_TAG_NAME = r"(?:(?:local-)?command-[a-z-]+|system-[a-z-]+)"
-_SYSTEM_TAG_BLOCK = re.compile(
-    rf"<({_SYSTEM_TAG_NAME})\b[^>]*>.*?</\1>|<{_SYSTEM_TAG_NAME}\b[^>]*/?>",
-    re.DOTALL | re.IGNORECASE,
-)
+# Claude Code wraps slash commands, caveats, reminders, and other
+# plumbing in XML-style tags inside transcript entries. Strip just the
+# tags (<tag> and </tag>) in channel context previews — inner content
+# is left intact.
+_XML_TAG = re.compile(r"</?\w[\w-]*[^>]*/?>")
 
 
 def _strip_system_tags(text):
-    """Remove Claude Code wrapper tags so only the user's real text remains."""
-    return _SYSTEM_TAG_BLOCK.sub("", text)
+    """Remove XML-style tags, preserving the inner text."""
+    return _XML_TAG.sub("", text)
 
 
 def extract_last_messages(transcript_path, max_messages=3, max_chars=200):

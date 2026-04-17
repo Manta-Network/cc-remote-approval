@@ -48,7 +48,7 @@ cat > ~/.cc-remote-approval/config.json << 'CONF'
   "chat_id": "<CHAT_ID>",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
-  "stop_hook_enabled": true,
+  "stop_hook_enabled": false,
   "stop_wait_seconds": 180,
   "context_turns": 3,
   "context_max_chars": 200,
@@ -85,6 +85,6 @@ curl -s -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 | `elicitation_timeout` | 60 | Seconds before showing local form for MCP elicitations |
 | `context_turns` | 3 | Number of conversation turns to show in context |
 | `context_max_chars` | 200 | Max chars per context turn |
-| `stop_hook_enabled` | `true` | Enable Stop hook for remote task continuation. Set `false` to disable. |
+| `stop_hook_enabled` | `false` | Enable Stop hook for remote task continuation (opt-in — blocks Claude Code for `stop_wait_seconds` between turns). |
 | `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle (local input in Claude Code releases immediately) |
 | `session_hint_enabled` | `true` | Inject SessionStart hint steering Claude to prefer AskUserQuestion tool for option-picking. Set `false` to disable. |

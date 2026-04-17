@@ -69,7 +69,7 @@ Manual config:
   "chat_id": "your-chat-id",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
-  "stop_hook_enabled": true,
+  "stop_hook_enabled": false,
   "stop_wait_seconds": 180,
   "session_hint_enabled": true
 }
@@ -99,7 +99,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | \
 | `elicitation_timeout` | 60 | Seconds before falling back to local form for MCP elicitations |
 | `context_turns` | 3 | Conversation turns shown in message context |
 | `context_max_chars` | 200 | Max chars per context turn |
-| `stop_hook_enabled` | `true` | Enable Stop hook for remote task continuation. Set `false` to disable. |
+| `stop_hook_enabled` | `false` | Enable Stop hook for remote task continuation (opt-in — blocks Claude Code for `stop_wait_seconds` between turns). |
 | `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle (local input in Claude Code releases immediately) |
 | `session_hint_enabled` | `true` | Inject SessionStart hint that steers Claude to prefer `AskUserQuestion` tool for option-picking (renders as buttons on channel). Set `false` to let Claude use its natural behavior. |
 

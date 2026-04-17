@@ -1482,7 +1482,7 @@ class TestStopHookConfig:
 
     def test_default_enabled(self):
         from utils.common import DEFAULTS
-        assert DEFAULTS["stop_hook_enabled"] is True
+        assert DEFAULTS["stop_hook_enabled"] is False
 
     def test_default_wait_seconds(self):
         from utils.common import DEFAULTS

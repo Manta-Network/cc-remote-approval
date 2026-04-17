@@ -62,7 +62,7 @@ Contains a timestamp. `notification.py` checks this file — if it exists and wa
 New field in `config.json`:
 ```json
 {
-  "stop_hook_enabled": true
+  "stop_hook_enabled": false
 }
 ```
 

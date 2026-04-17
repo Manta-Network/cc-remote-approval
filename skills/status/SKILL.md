@@ -128,7 +128,7 @@ cc-remote-approval status:
   ✅ config file readable
   ✅ bot @xxxxx responds to getMe
   ✅ chat_id 123456 reachable
-  ✅ stop_hook_enabled=true (remote task continuation active)
+  ℹ️  stop_hook_enabled=false (default — enable for remote task continuation)
   ✅ session_hint_enabled=true (AskUserQuestion steering active)
   ⚠️  1 corrupt state file from 2026-04-14 — safe to delete
   ℹ️  last permission_request hook fired 2h ago

@@ -43,7 +43,7 @@ def main():
     _log(f"event: {json.dumps(event, ensure_ascii=False)[:500]}")
 
     cfg = load_config()
-    if not cfg.get("stop_hook_enabled", True):
+    if not cfg.get("stop_hook_enabled", False):
         _log("Stop hook disabled (stop_hook_enabled=false)")
         sys.exit(0)
 

@@ -1368,6 +1368,51 @@ class TestStopHookContinueFlow:
         assert os.path.exists(os.path.join(str(tmp_path), "handled"))
 
 
+class TestStopHookLocalResponse:
+    """Stop hook releases when user types in terminal (transcript grows)."""
+
+    def test_local_response_releases_stop(self, monkeypatch, tmp_path):
+        """Transcript growth during poll → exit immediately, update TG."""
+        import hooks.stop as stop_mod
+        import io
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 100)
+
+        ch = _PollableFakeChannel()
+        # No TG responses queued — but transcript will grow
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", lambda: {
+            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 180,
+            "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
+            "channel_type": "telegram",
+        })
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path / "signal"))
+
+        sleep_count = [0]
+        def fake_sleep(s):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 2:
+                transcript.write_text("x" * 500)  # simulate user typing
+        monkeypatch.setattr(stop_mod.time, "sleep", fake_sleep)
+
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+            "cwd": "/home/user/proj",
+            "transcript_path": str(transcript),
+        })))
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+        # No block decision — allowed idle
+        assert stdout.getvalue() == ""
+        # TG message should be edited to "Handled locally"
+        assert any("Handled locally" in e["text"] for e in ch._edited_messages)
+
+
 class TestStopHookAdditionalContext:
     """The additionalContext format for injecting instructions."""
 

@@ -18,7 +18,7 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          STOP_SIGNAL_DIR)
+                          check_local_response, STOP_SIGNAL_DIR)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -83,8 +83,24 @@ def main():
     # Track prompt message IDs for cleanup
     prompt_ids = []
 
+    # Baseline transcript size for local response detection
+    transcript_path = event.get("transcript_path", "")
+    poll_start_size = 0
+    if transcript_path:
+        try:
+            poll_start_size = os.path.getsize(transcript_path)
+        except OSError:
+            pass
+
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
+        # Race: if user types in terminal, transcript grows → release immediately
+        if transcript_path and check_local_response(transcript_path, poll_start_size):
+            _log("User responded locally, releasing stop")
+            ch.edit_message(msg_id, text=_status_text("🖥 <b>Handled locally</b>", session_tag), buttons=[])
+            _cleanup_prompts(ch, prompt_ids)
+            sys.exit(0)
+
         update = ch.poll(msg_id if not prompt_ids else [msg_id] + prompt_ids)
         if update is None:
             time.sleep(1)

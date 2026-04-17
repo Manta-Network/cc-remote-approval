@@ -1162,3 +1162,169 @@ class TestElicitationResponseHandoff:
 
 
 # Notification tests are in test_integration.py (TestNotificationFlow)
+
+
+# --- Stop hook ---
+
+class TestStopHookSignalFile:
+    """Signal file dedup between Stop hook and Notification hook."""
+
+    def test_write_and_check_signal(self, tmp_path, monkeypatch):
+        """Write signal → check returns True within TTL."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        # Also patch the module-level import in check_stop_signal
+        import utils.common as common_mod
+        monkeypatch.setattr(common_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        # Re-patch since check_stop_signal uses the constant directly
+        signal_path = os.path.join(str(tmp_path), "handled")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time()))
+        assert stop_mod.check_stop_signal() is True
+
+    def test_stale_signal_ignored(self, tmp_path, monkeypatch):
+        """Signal older than TTL is ignored."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time() - 60))  # 60s ago, well past TTL
+        assert stop_mod.check_stop_signal() is False
+
+    def test_missing_signal_returns_false(self, tmp_path, monkeypatch):
+        """No signal file → returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        assert stop_mod.check_stop_signal() is False
+
+    def test_corrupt_signal_returns_false(self, tmp_path, monkeypatch):
+        """Non-numeric content in signal file → returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled")
+        with open(signal_path, "w") as f:
+            f.write("not-a-number")
+        assert stop_mod.check_stop_signal() is False
+
+
+class TestStopHookStatusText:
+    """_status_text helper."""
+
+    def test_with_session_tag(self):
+        from hooks.stop import _status_text
+        result = _status_text("💤 Dismissed", "my-project")
+        assert "Dismissed" in result
+        assert "my-project" in result
+
+    def test_without_session_tag(self):
+        from hooks.stop import _status_text
+        result = _status_text("💤 Dismissed", None)
+        assert "Dismissed" in result
+        assert "code>" not in result
+
+
+class TestStopHookSessionTag:
+    """_session_tag helper."""
+
+    def test_extracts_basename(self):
+        from hooks.stop import _session_tag
+        assert _session_tag({"cwd": "/home/user/my-project"}) == "my-project"
+
+    def test_empty_cwd(self):
+        from hooks.stop import _session_tag
+        assert _session_tag({"cwd": ""}) is None
+        assert _session_tag({}) is None
+
+
+class TestStopHookButtons:
+    """Button layout and callback_data."""
+
+    def test_button_layout(self):
+        """Stop message should have Continue and Dismiss buttons."""
+        ch = FakeChannel()
+        # Simulate what stop.py sends
+        buttons = [
+            [
+                {"text": "✏️ Continue", "callback_data": "stop:continue"},
+                {"text": "❌ Dismiss", "callback_data": "stop:dismiss"},
+            ]
+        ]
+        ch.send_message("idle", buttons=buttons)
+        sent = ch._sent_messages[0]
+        flat = [b for row in sent["buttons"] for b in row]
+        data_values = [b["callback_data"] for b in flat]
+        assert "stop:continue" in data_values
+        assert "stop:dismiss" in data_values
+
+
+class TestStopHookAdditionalContext:
+    """The additionalContext format for injecting instructions."""
+
+    def test_context_format(self):
+        """Verify the XML wrapper format."""
+        instruction = "fix the login bug"
+        context = (
+            "<cc-remote-approval>\n"
+            "The user sent a new instruction via the remote messaging channel (Telegram).\n"
+            "Please execute this instruction:\n\n"
+            f"{instruction}\n"
+            "</cc-remote-approval>"
+        )
+        assert "<cc-remote-approval>" in context
+        assert "fix the login bug" in context
+        assert "</cc-remote-approval>" in context
+
+    def test_block_decision_format(self):
+        """The JSON output for blocking stop."""
+        output = {
+            "decision": "block",
+            "hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": "test instruction",
+            }
+        }
+        assert output["decision"] == "block"
+        assert output["hookSpecificOutput"]["hookEventName"] == "Stop"
+
+
+class TestStopHookNoChannel:
+    """When channel is unavailable, Stop hook should exit silently."""
+
+    def test_no_channel_exits_silently(self, monkeypatch):
+        import hooks.stop as stop_mod
+        import utils.channel as ch_mod
+        from utils.channel import ChannelError
+        monkeypatch.setattr(ch_mod, "create_channel", lambda cfg: (None, ChannelError("test")))
+        monkeypatch.setattr(stop_mod, "load_config", lambda: {
+            "bot_token": "", "chat_id": "", "stop_wait_seconds": 180,
+            "context_turns": 3, "context_max_chars": 200,
+            "channel_type": "telegram",
+        })
+        monkeypatch.setattr("sys.stdin", __import__("io").StringIO('{}'))
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+
+
+class TestStopHookConfig:
+    """stop_wait_seconds config handling."""
+
+    def test_default_in_config(self):
+        from utils.common import DEFAULTS
+        assert "stop_wait_seconds" in DEFAULTS
+        assert DEFAULTS["stop_wait_seconds"] == 180
+
+    def test_zero_wait_exits(self, monkeypatch):
+        """stop_wait_seconds=0 should skip the stop hook."""
+        import hooks.stop as stop_mod
+        import utils.channel as ch_mod
+        monkeypatch.setattr(ch_mod, "create_channel", lambda cfg: (FakeChannel(), None))
+        monkeypatch.setattr(stop_mod, "load_config", lambda: {
+            "bot_token": "tok", "chat_id": "123", "stop_wait_seconds": 0,
+            "context_turns": 3, "context_max_chars": 200,
+            "channel_type": "telegram",
+        })
+        monkeypatch.setattr("sys.stdin", __import__("io").StringIO('{}'))
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0

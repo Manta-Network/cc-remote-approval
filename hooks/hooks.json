@@ -49,6 +49,18 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=${CLAUDE_PLUGIN_ROOT} python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py",
+            "timeout": 259200
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",

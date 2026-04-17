@@ -14,6 +14,7 @@ CONFIG_PATH = os.path.expanduser("~/.cc-remote-approval/config.json")
 RUNTIME_DIR = os.path.join(tempfile.gettempdir(), "cc-remote-approval")
 TG_POLL_DIR = os.path.join(RUNTIME_DIR, "tg")
 ELICIT_SIGNAL_DIR = os.path.join(RUNTIME_DIR, "elicit")
+STOP_SIGNAL_DIR = os.path.join(RUNTIME_DIR, "stop")
 LOG_DIR = os.path.join(RUNTIME_DIR, "logs")
 
 DEFAULTS = {
@@ -24,6 +25,8 @@ DEFAULTS = {
     "elicitation_timeout": 60,
     "context_turns": 3,
     "context_max_chars": 200,
+    "stop_wait_seconds": 180,
+    "stop_hook_enabled": False,
     "session_hint_enabled": True,
 }
 

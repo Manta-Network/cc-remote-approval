@@ -50,6 +50,14 @@ def main():
         _log(f"Ignoring notification_type={notification_type!r} (no message template)")
         sys.exit(0)
 
+    # Dedup: Stop hook already sent an interactive idle message — skip the
+    # plain notification so the user doesn't see two "idle" messages.
+    if notification_type == "idle_prompt":
+        from hooks.stop import check_stop_signal
+        if check_stop_signal():
+            _log("Stop hook recently handled idle, skipping duplicate notification")
+            sys.exit(0)
+
     transcript_path = event.get("transcript_path", "")
     context_lines = format_context_lines(
         transcript_path,

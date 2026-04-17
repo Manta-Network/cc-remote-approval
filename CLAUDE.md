@@ -26,6 +26,7 @@ cc-remote-approval/
 │   ├── elicitation.py           # Elicitation — MCP form hook (hybrid mode)
 │   ├── elicitation_result.py    # ElicitationResult — local form completion signal
 │   ├── notification.py          # Notification — idle alert
+│   ├── stop.py                  # Stop — remote prompt injection when idle
 │   └── session_start.py         # SessionStart — AskUserQuestion preference hint injection
 ├── utils/                       # Shared utilities (channel-agnostic)
 │   ├── common.py                # Config, masking, logging, IPC helpers
@@ -39,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 169 automated tests
+├── test/                        # 202 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -79,7 +80,8 @@ create_channel(cfg) reads cfg["channel_type"] and returns the right implementati
 | `hooks/permission_request.py` | Sleep N seconds → detect local response → if none, send via channel → poll for callback → return decision |
 | `hooks/elicitation.py` | Fork: child sends form immediately (with timeout countdown hint), parent blocks 60s. Channel responds → return data; timeout → show local form + activate terminal. Boolean defaults applied at submit, not pre-filled. Resolved messages include form title + submitted values. |
 | `hooks/elicitation_result.py` | User fills form locally → write signal file → child updates channel |
-| `hooks/notification.py` | Fire-and-forget: send notification when agent is idle |
+| `hooks/stop.py` | Intercept before idle → send TG with Continue/Dismiss buttons → poll for new instruction → block stop with additionalContext or allow idle. Signal file dedup with Notification hook. |
+| `hooks/notification.py` | Fire-and-forget: send notification when agent is idle. Skips if Stop hook recently handled. |
 | `hooks/session_start.py` | Fires on new session — injects a system-context hint steering Claude to prefer the `AskUserQuestion` tool over free-text option lists (structured tool = reliable button UI on the channel, no heuristic parsing needed). Only fires when a channel is configured. |
 | `utils/common.py` | Config loading, secret masking, HTML escaping, logging, local response detection |
 | `utils/channel.py` | Channel interface + factory. Hooks call `ch.send_message()`, `ch.poll()`, `ch.edit_message()` |
@@ -97,6 +99,8 @@ All hooks read from `~/.cc-remote-approval/config.json`:
   "chat_id": "Your chat ID",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
+  "stop_wait_seconds": 180,
+  "stop_hook_enabled": false,
   "context_turns": 3,
   "context_max_chars": 200,
   "session_hint_enabled": true
@@ -108,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 188 tests, ~0.1s
+pytest test/ -v    # 202 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -156,21 +160,22 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | 13 | **MCP form (Elicitation)** | Elicitation | ✅ | Hybrid: channel direct or timeout → local form. Shows timeout countdown hint; resolved messages include form title |
 | 14 | **Prompt change** | PromptRequest | ❌ | Not implemented |
 | 15 | **PreToolUse intercept** | PreToolUse | ❌ | Not implemented |
-| 16 | **Idle waiting** | Notification | ✅ | idle_prompt |
+| 16 | **Idle waiting** | Notification | ✅ | idle_prompt (skipped when Stop hook handles) |
 | 17 | **Permission dialog (`permission_prompt`)** | Notification | 🚫 | Intentionally suppressed — PermissionRequest hook already sends a richer actionable message for the same event |
 | 18 | **System-prompt nudge toward `AskUserQuestion`** | SessionStart | ✅ | Injected automatically when channel is configured — steers the model to use the structured tool (with buttons) instead of free-text numbered lists when presenting choices |
+| 19 | **Remote prompt injection** | Stop | ✅ | Intercept before idle → Continue/Dismiss buttons → user sends new instruction via TG → inject as additionalContext |
 
 ### B. Non-Hookable (Claude Code doesn't expose hooks)
 
-#18-29: MCP Server approval, API Key, Worktree, OAuth, Session resume, etc. — require Claude Code to add hook support.
+#20-30: MCP Server approval, API Key, Worktree, OAuth, Session resume, etc. — require Claude Code to add hook support.
 
 ### Summary
 
 | Scope | Coverage |
 |---|---|
-| Hookable scenarios (#1-17) | **14/17 (82%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **188 tests in ~0.1s** |
-| All UI scenarios (#1-29) | **14/29 (48%)** |
+| Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
+| Automated tests | **202 tests in ~0.1s** |
+| All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards
 
@@ -217,9 +222,14 @@ $TMPDIR/cc-remote-approval/                  # Temporary (OS-managed)
 │   └── {request_id}.done                    # elicitation_result → child: user filled locally
 │                                            # Lifecycle: <1 min, deleted by child on exit
 │
+├── stop/                                    # Stop hook signal files
+│   └── handled                              # Timestamp — Notification hook skips if fresh (<30s)
+│                                            # Lifecycle: overwritten each time Stop hook resolves
+│
 └── logs/                                    # Debug logs (PID-tagged for multi-session)
     ├── permission_request.log               # Lifecycle: auto-rotate at 1MB (keep last 512KB)
     ├── elicitation.log                      # Lifecycle: auto-rotate at 1MB
+    ├── stop.log                             # Lifecycle: auto-rotate at 1MB
     └── notification.log                     # Lifecycle: auto-rotate at 1MB
 ```
 

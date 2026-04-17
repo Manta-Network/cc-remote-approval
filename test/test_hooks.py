@@ -1164,6 +1164,65 @@ class TestElicitationResponseHandoff:
 # Notification tests are in test_integration.py (TestNotificationFlow)
 
 
+class TestLocalResponseRaceAfterCallback:
+    """Defense against a TOCTOU race: local transcript grows between the
+    last check_local_response and ch.poll() returning a callback. Without
+    the re-check, we'd return the remote decision and overwrite what the
+    user just did locally."""
+
+    def test_poll_callback_returns_local_when_transcript_grew_after_poll(self, tmp_path, monkeypatch):
+        """poll_callback must re-check check_local_response after the channel
+        returns a callback, and return 'local' if the transcript grew."""
+        from permission_request import poll_callback
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 1000)
+        baseline = 1000
+
+        ch = FakeChannel()
+        # Simulate: poll returns a callback immediately
+        poll_count = {"n": 0}
+        def fake_poll(msg_id):
+            poll_count["n"] += 1
+            if poll_count["n"] == 1:
+                # First poll: return a callback
+                # But also grow transcript in parallel, to simulate local response
+                transcript.write_text("x" * 5000)
+                return {"type": "callback", "data": "allow"}
+            return None
+        ch.poll = fake_poll
+
+        result = poll_callback(ch, message_id=100,
+                               transcript_path=str(transcript),
+                               poll_start_size=baseline)
+        # Should detect the parallel local growth and return "local"
+        assert result == "local"
+
+    def test_poll_question_answer_returns_local_when_transcript_grew(self, tmp_path):
+        from permission_request import poll_question_answer
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 1000)
+        baseline = 1000
+
+        ch = FakeChannel()
+        poll_count = {"n": 0}
+        def fake_poll(msg_ids):
+            poll_count["n"] += 1
+            if poll_count["n"] == 1:
+                transcript.write_text("x" * 5000)
+                return {"type": "callback", "data": "opt:0"}
+            return None
+        ch.poll = fake_poll
+
+        options = [{"label": "Yes", "description": ""}, {"label": "No", "description": ""}]
+        result = poll_question_answer(
+            ch, message_id=100, options=options, multi=False,
+            transcript_path=str(transcript), poll_start_size=baseline,
+        )
+        assert result == ("local", None)
+
+
 # --- Stop hook ---
 
 class TestStopHookSignalFile:

@@ -33,6 +33,7 @@ Claude Code needs permission → Native dialog shows locally (as usual)
 | AskUserQuestion | PermissionRequest | Option buttons + text input |
 | MCP forms (Elicitation) | Elicitation | Remote form (string/enum/boolean/integer/number fields), 60s timeout falls back to local |
 | Agent idle | Notification | 💤 idle notification |
+| Remote task continuation (optional) | Stop | Continue/Dismiss buttons, reply with next instruction; opt-in via `stop_hook_enabled` |
 
 ---
 

@@ -17,7 +17,7 @@ Claude finishes task → Stop hook fires
       {context}
       [✏️ Continue]  [❌ Dismiss]
 
-  → Poll TG for response (up to POLL_TIMEOUT_SECONDS):
+  → Poll TG for response (up to stop_wait_seconds, default 180s from config):
 
     A) User clicks "✏️ Continue"
        → Send ForceReply prompt: "Reply with your next instruction"
@@ -32,7 +32,7 @@ Claude finishes task → Stop hook fires
        → Return empty (allow idle)
        → Write signal file to dedup with Notification hook
 
-    C) Timeout (POLL_TIMEOUT_SECONDS)
+    C) Timeout (stop_wait_seconds, default 180s from config)
        → Edit message: "💤 Timed out"
        → Return empty (allow idle)
        → Write signal file to dedup with Notification hook
@@ -53,9 +53,11 @@ Follows the same patterns as `permission_request.py`:
 
 When Stop hook handles the idle event (dismiss or timeout), it writes:
 ```
-$TMPDIR/cc-remote-approval/stop_handled
+$TMPDIR/cc-remote-approval/stop/handled_{session_id}
 ```
 Contains a timestamp. `notification.py` checks this file — if it exists and was created within the last 30 seconds, skip the idle_prompt notification.
+
+The signal file is **session-scoped** (keyed on `session_id`) so concurrent Claude Code sessions don't dedup each other's notifications — each session has its own dedup window.
 
 ### Config
 
@@ -96,11 +98,18 @@ The user sent a new instruction via the remote messaging channel (Telegram). Ple
 
 ## Message States
 
-1. **Initial**: idle message + 2 buttons + context
-2. **Continue clicked**: "⏳ Waiting for instruction..." (buttons removed) + ForceReply prompt
-3. **Instruction received**: "✅ New task sent: {instruction}" (prompt deleted)
-4. **Dismissed**: "💤 Dismissed"
-5. **Timeout**: "💤 Timed out"
+Resolved messages keep the `💤 Agent idle` title and append the status + `{session_tag}` so users can tell concurrent sessions apart at a glance. Format: `💤 Agent idle · {status} · {session_tag}`.
+
+1. **Initial**: `💤 Agent idle · {session_tag}` + context + 2 buttons
+2. **Continue clicked**: `💤 Agent idle · ⏳ Waiting for instruction... · {session_tag}` (buttons removed) + ForceReply prompt
+3. **New task sent**: `💤 Agent idle · ✅ New task sent: {instruction} · {session_tag}` (prompt deleted)
+4. **Dismissed**: `💤 Agent idle · ❌ Dismissed · {session_tag}`
+5. **Timeout**: `💤 Agent idle · ⏰ Timed out · {session_tag}`
+6. **Handled locally**: `💤 Agent idle · 🖥️ Handled locally · {session_tag}` (user typed in the terminal before the remote side resolved)
+
+### Terminal race detection
+
+During polling the hook performs a best-effort check for transcript growth (signal that the user typed something locally). If detected, the message transitions to **Handled locally** and the hook exits without blocking. Note: this check may not fire reliably during active hook execution (Claude Code doesn't flush transcript writes on a fixed schedule), so it is defensive insurance rather than a guaranteed path. The primary local-handled signal is the same `check_local_response` used by other hooks; transcript polling is kept here to leave room for future Claude Code improvements.
 
 ## Edge Cases
 

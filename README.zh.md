@@ -33,6 +33,7 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
 | AskUserQuestion | PermissionRequest | 选项按钮 + 文本输入 |
 | MCP 表单 (Elicitation) | Elicitation | 远程表单，60s 超时回退本地 |
 | Agent 空闲 | Notification | 💤 idle 通知 |
+| 远程续任务（可选） | Stop | Continue/Dismiss 按钮，回复下一条指令；通过 `stop_hook_enabled` 开启 |
 
 ---
 
@@ -68,7 +69,10 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
   "stop_hook_enabled": false,
-  "stop_wait_seconds": 180
+  "stop_wait_seconds": 180,
+  "context_turns": 3,
+  "context_max_chars": 200,
+  "session_hint_enabled": true
 }
 ```
 
@@ -98,6 +102,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | \
 | `stop_wait_seconds` | 180 | 等待远程指令的超时秒数（在 Claude Code 内本地输入会立即释放） |
 | `context_turns` | 3 | 消息里显示几轮对话上下文 |
 | `context_max_chars` | 200 | 每轮上下文最大字符数 |
+| `session_hint_enabled` | `true` | SessionStart 提示注入，引导 Claude 使用 `AskUserQuestion` 工具（在消息渠道上渲染为按钮）。设为 `false` 可让 Claude 使用原生行为。 |
 
 所有时间参数均可配置。也可以通过环境变量覆盖任意配置项，前缀为 `CC_REMOTE_APPROVAL_`（例如 `CC_REMOTE_APPROVAL_ESCALATION_SECONDS=60`）。
 

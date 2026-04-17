@@ -40,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 202 automated tests
+├── test/                        # 208 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -112,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 202 tests, ~0.1s
+pytest test/ -v    # 208 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -174,7 +174,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | Scope | Coverage |
 |---|---|
 | Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **202 tests in ~0.1s** |
+| Automated tests | **208 tests in ~0.1s** |
 | All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards
@@ -222,9 +222,10 @@ $TMPDIR/cc-remote-approval/                  # Temporary (OS-managed)
 │   └── {request_id}.done                    # elicitation_result → child: user filled locally
 │                                            # Lifecycle: <1 min, deleted by child on exit
 │
-├── stop/                                    # Stop hook signal files
-│   └── handled                              # Timestamp — Notification hook skips if fresh (<30s)
-│                                            # Lifecycle: overwritten each time Stop hook resolves
+├── stop/                                    # Stop hook signal files (session-scoped)
+│   └── handled_{session_id}                 # Timestamp — Notification hook skips if fresh (<30s)
+│                                            # Session-scoped so concurrent sessions don't dedup each other
+│                                            # Lifecycle: overwritten each time Stop hook resolves for that session
 │
 └── logs/                                    # Debug logs (PID-tagged for multi-session)
     ├── permission_request.log               # Lifecycle: auto-rotate at 1MB (keep last 512KB)
@@ -246,7 +247,7 @@ On Linux, `$TMPDIR` = `/tmp` (cleaned on reboot on most distros).
 4. **Telegram getUpdates global offset** — concurrent hooks must use coordinated polling, otherwise they consume each other's updates
 5. **Same-server concurrent elicitation** — when the user fills a form locally, `ElicitationResult` signals ALL active requests from that MCP server as "handled locally". This is intentional: Claude Code doesn't provide a request-level correlation ID in ElicitationResult events, so we cannot distinguish which specific form was filled. If a single MCP server triggers multiple concurrent forms, filling one locally will cancel all pending remote forms for that server. This is an acceptable trade-off since concurrent elicitation from the same server is rare in practice.
 6. **Text replies require quote-reply anchoring** — `poll.py` routes text messages to the originating hook via `reply_to_message.message_id`. Bare text (no quote) is intentionally dropped to prevent concurrent hooks from stealing each other's replies. To make this ergonomic, `send_reply_prompt` uses Telegram's `ForceReply` reply markup, which auto-locks the user's input box to "reply to this message" mode — including notification quick-reply and Apple Watch, where swipe-to-quote isn't available. The `poll()` interface accepts a **list** of msg_ids: the AskUserQuestion "Other" flow appends the prompt msg_id so replies quoted against either the question or the prompt route to the same hook. Transient prompts are tracked in `state["prompt_ids"]` and deleted via `ch.delete_message()` on every exit path (normal resolve, signal handler, atexit), so users never see a stranded "Reply to this message" lock on an already-handled request.
-7. **No end-of-turn question relay** — Claude Code has no structured "this turn was a question" signal. Instead of heuristic-parsing the last assistant message, we steer the model toward the `AskUserQuestion` tool via `SessionStart` `additionalContext`. The tool routes through PermissionRequest and already has a solid button UI. We prototyped a Stop-hook approach with regex detection and `{decision: block, reason}` injection, but removed it — heuristics were too approximate across languages/phrasings, and the SessionStart nudge eliminates the need when the model picks the right tool.
+7. **No end-of-turn question relay** — Claude Code has no structured "this turn was a question" signal. Instead of heuristic-parsing the last assistant message to detect "this turn asked the user something," we steer the model toward the `AskUserQuestion` tool via `SessionStart` `additionalContext`. The tool routes through PermissionRequest and already has a solid button UI. We prototyped a Stop-hook approach that used regex/heuristics to *detect end-of-turn questions* and auto-inject a reply, but removed that detection layer — heuristics were too approximate across languages/phrasings, and the SessionStart nudge eliminates the need when the model picks the right tool. Note this is about **auto-detecting questions**, not about the Stop hook's `{decision: "block", reason: ...}` mechanism itself — the shipped Stop hook (scenario #19) uses that same mechanism for **user-driven remote continuation**: the user explicitly taps Continue and types a new instruction, and the hook injects it as the `reason` directive. That path is deterministic (user action, not heuristic detection) and is fully supported.
 
 ## Adding a New Channel
 

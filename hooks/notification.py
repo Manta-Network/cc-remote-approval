@@ -52,9 +52,11 @@ def main():
 
     # Dedup: Stop hook already sent an interactive idle message — skip the
     # plain notification so the user doesn't see two "idle" messages.
+    # Scoped by session_id so concurrent sessions don't interfere.
     if notification_type == "idle_prompt":
         from hooks.stop import check_stop_signal
-        if check_stop_signal():
+        session_id = event.get("session_id", "")
+        if check_stop_signal(session_id):
             _log("Stop hook recently handled idle, skipping duplicate notification")
             sys.exit(0)
 

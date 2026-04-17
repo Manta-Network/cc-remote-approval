@@ -18,8 +18,7 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
-                          check_local_response, STOP_SIGNAL_DIR,
-                          POLL_TIMEOUT_SECONDS)
+                          check_local_response, STOP_SIGNAL_DIR)
 from utils.channel import create_channel
 
 _log = make_logger("stop")
@@ -46,6 +45,13 @@ def main():
     if not ch:
         _log(f"Channel unavailable: {ch_err}")
         sys.exit(0)
+
+    wait_seconds = cfg.get("stop_wait_seconds", 180)
+    if wait_seconds <= 0:
+        _log("stop_wait_seconds <= 0, skipping")
+        sys.exit(0)
+
+    session_id = event.get("session_id", "")
 
     # Build idle message
     transcript_path = event.get("transcript_path", "")
@@ -88,7 +94,7 @@ def main():
         except OSError:
             pass
 
-    deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+    deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         # Race: if user types in terminal, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):
@@ -120,7 +126,7 @@ def main():
                 _log("User clicked Dismiss")
                 ch.edit_message(msg_id, text=_status_text("💤 Dismissed", session_tag), buttons=[])
                 _cleanup_prompts(ch, prompt_ids)
-                _write_signal()
+                _write_signal(session_id)
                 sys.exit(0)
 
         elif update["type"] == "text":
@@ -151,11 +157,11 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    # Timeout (should rarely happen — 3 day poll timeout)
-    _log("Poll timeout reached")
+    # Timeout — no one responded on TG or terminal within stop_wait_seconds
+    _log(f"Timeout after {wait_seconds}s")
     ch.edit_message(msg_id, text=_status_text("💤 Timed out", session_tag), buttons=[])
     _cleanup_prompts(ch, prompt_ids)
-    _write_signal()
+    _write_signal(session_id)
     sys.exit(0)
 
 
@@ -181,20 +187,22 @@ def _cleanup_prompts(ch, prompt_ids):
         ch.delete_message(pid)
 
 
-def _write_signal():
-    """Write signal file so Notification hook skips duplicate idle message."""
+def _write_signal(session_id):
+    """Write session-scoped signal file so Notification hook skips duplicate idle message."""
     os.makedirs(STOP_SIGNAL_DIR, exist_ok=True)
-    signal_path = os.path.join(STOP_SIGNAL_DIR, "handled")
+    fname = f"handled_{session_id}" if session_id else "handled"
+    signal_path = os.path.join(STOP_SIGNAL_DIR, fname)
     with open(signal_path, "w") as f:
         f.write(str(time.time()))
     _log(f"Wrote signal file: {signal_path}")
 
 
-def check_stop_signal():
-    """Check if Stop hook recently handled the idle event.
+def check_stop_signal(session_id=""):
+    """Check if Stop hook recently handled the idle event for this session.
     Called by notification.py to avoid duplicate idle messages.
     Returns True if signal is fresh (within TTL)."""
-    signal_path = os.path.join(STOP_SIGNAL_DIR, "handled")
+    fname = f"handled_{session_id}" if session_id else "handled"
+    signal_path = os.path.join(STOP_SIGNAL_DIR, fname)
     try:
         with open(signal_path) as f:
             ts = float(f.read().strip())

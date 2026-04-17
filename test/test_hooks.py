@@ -1167,44 +1167,50 @@ class TestElicitationResponseHandoff:
 # --- Stop hook ---
 
 class TestStopHookSignalFile:
-    """Signal file dedup between Stop hook and Notification hook."""
+    """Signal file dedup between Stop hook and Notification hook (session-scoped)."""
 
     def test_write_and_check_signal(self, tmp_path, monkeypatch):
-        """Write signal → check returns True within TTL."""
+        """Write signal for session → check same session returns True."""
         import hooks.stop as stop_mod
         monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
-        # Also patch the module-level import in check_stop_signal
-        import utils.common as common_mod
-        monkeypatch.setattr(common_mod, "STOP_SIGNAL_DIR", str(tmp_path))
-        # Re-patch since check_stop_signal uses the constant directly
-        signal_path = os.path.join(str(tmp_path), "handled")
+        signal_path = os.path.join(str(tmp_path), "handled_sess-abc")
         with open(signal_path, "w") as f:
             f.write(str(time.time()))
-        assert stop_mod.check_stop_signal() is True
+        assert stop_mod.check_stop_signal("sess-abc") is True
+
+    def test_different_session_not_affected(self, tmp_path, monkeypatch):
+        """Signal for session A → check session B returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled_sess-a")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time()))
+        assert stop_mod.check_stop_signal("sess-a") is True
+        assert stop_mod.check_stop_signal("sess-b") is False
 
     def test_stale_signal_ignored(self, tmp_path, monkeypatch):
         """Signal older than TTL is ignored."""
         import hooks.stop as stop_mod
         monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
-        signal_path = os.path.join(str(tmp_path), "handled")
+        signal_path = os.path.join(str(tmp_path), "handled_sess-x")
         with open(signal_path, "w") as f:
             f.write(str(time.time() - 60))  # 60s ago, well past TTL
-        assert stop_mod.check_stop_signal() is False
+        assert stop_mod.check_stop_signal("sess-x") is False
 
     def test_missing_signal_returns_false(self, tmp_path, monkeypatch):
         """No signal file → returns False."""
         import hooks.stop as stop_mod
         monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
-        assert stop_mod.check_stop_signal() is False
+        assert stop_mod.check_stop_signal("sess-y") is False
 
     def test_corrupt_signal_returns_false(self, tmp_path, monkeypatch):
         """Non-numeric content in signal file → returns False."""
         import hooks.stop as stop_mod
         monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
-        signal_path = os.path.join(str(tmp_path), "handled")
+        signal_path = os.path.join(str(tmp_path), "handled_sess-z")
         with open(signal_path, "w") as f:
             f.write("not-a-number")
-        assert stop_mod.check_stop_signal() is False
+        assert stop_mod.check_stop_signal("sess-z") is False
 
 
 class TestStopHookStatusText:
@@ -1276,7 +1282,8 @@ class TestStopHookContinueFlow:
     def _make_cfg(self):
         return {
             "bot_token": "tok", "chat_id": "123",
-            "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
+            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         }
 
@@ -1385,7 +1392,8 @@ class TestStopHookLocalResponse:
         monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
         monkeypatch.setattr(stop_mod, "load_config", lambda: {
             "bot_token": "tok", "chat_id": "123",
-            "stop_hook_enabled": True, "context_turns": 1, "context_max_chars": 200,
+            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "context_turns": 1, "context_max_chars": 200,
             "channel_type": "telegram",
         })
         monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path / "signal"))
@@ -1463,9 +1471,12 @@ class TestStopHookNoChannel:
 
 
 class TestStopHookConfig:
-    """stop_hook_enabled config handling."""
+    """Config defaults."""
 
     def test_default_enabled(self):
         from utils.common import DEFAULTS
-        assert "stop_hook_enabled" in DEFAULTS
         assert DEFAULTS["stop_hook_enabled"] is True
+
+    def test_default_wait_seconds(self):
+        from utils.common import DEFAULTS
+        assert DEFAULTS["stop_wait_seconds"] == 180

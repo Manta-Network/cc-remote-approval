@@ -12,17 +12,14 @@ on:
           - minor
           - major
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  create-release-pr:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -53,21 +50,20 @@ jobs:
           echo "version=${NEW}" >> "$GITHUB_OUTPUT"
           echo "Bumped $CURRENT → $NEW"
 
-      - name: Create release branch and PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit, tag and push
         run: |
           VERSION="${{ steps.bump.outputs.version }}"
-          BRANCH="release/v${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
           git add .claude-plugin/plugin.json
           git commit -m "chore: release v${VERSION}"
-          git push origin "$BRANCH"
-          gh pr create \
-            --title "chore: release v${VERSION}" \
-            --body "Automated release PR — bumps version to \`${VERSION}\`." \
-            --label "release" \
-            --head "$BRANCH" \
-            --base main
+          git tag "v${VERSION}"
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          gh release create "v${{ steps.bump.outputs.version }}" \
+            --title "v${{ steps.bump.outputs.version }}" \
+            --generate-notes

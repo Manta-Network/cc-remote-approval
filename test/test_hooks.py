@@ -1314,7 +1314,7 @@ class TestStopHookContinueFlow:
 
         output = json.loads(stdout.getvalue())
         assert output["decision"] == "block"
-        assert "fix the login bug" in output["hookSpecificOutput"]["additionalContext"]
+        assert "fix the login bug" in output["reason"]
 
     def test_continue_calls_send_reply_prompt_correctly(self, monkeypatch, tmp_path):
         """Verify send_reply_prompt is called with (msg_id, text) not (text, reply_to=msg_id)."""
@@ -1421,34 +1421,25 @@ class TestStopHookLocalResponse:
         assert any("Handled locally" in e["text"] for e in ch._edited_messages)
 
 
-class TestStopHookAdditionalContext:
-    """The additionalContext format for injecting instructions."""
+class TestStopHookBlockDecision:
+    """The JSON output format for blocking stop."""
 
-    def test_context_format(self):
-        """Verify the XML wrapper format."""
+    def test_block_decision_uses_reason_field(self):
+        """Stop hook only supports decision + reason, not hookSpecificOutput.
+        Per Claude Code's schema, Stop decisions must use the top-level
+        'reason' field for context injection."""
         instruction = "fix the login bug"
-        context = (
-            "<cc-remote-approval>\n"
-            "The user sent a new instruction via the remote messaging channel (Telegram).\n"
-            "Please execute this instruction:\n\n"
-            f"{instruction}\n"
-            "</cc-remote-approval>"
-        )
-        assert "<cc-remote-approval>" in context
-        assert "fix the login bug" in context
-        assert "</cc-remote-approval>" in context
-
-    def test_block_decision_format(self):
-        """The JSON output for blocking stop."""
         output = {
             "decision": "block",
-            "hookSpecificOutput": {
-                "hookEventName": "Stop",
-                "additionalContext": "test instruction",
-            }
+            "reason": (
+                "The user sent a new instruction via the remote messaging channel (Telegram). "
+                f"Please execute this instruction: {instruction}"
+            ),
         }
         assert output["decision"] == "block"
-        assert output["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert "fix the login bug" in output["reason"]
+        # Must NOT use hookSpecificOutput for Stop — schema rejects it
+        assert "hookSpecificOutput" not in output
 
 
 class TestStopHookNoChannel:

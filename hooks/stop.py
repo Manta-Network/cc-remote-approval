@@ -140,19 +140,14 @@ def main():
                 buttons=[],
             )
             _cleanup_prompts(ch, prompt_ids)
-            # Block stop, inject instruction
+            # Block stop, inject instruction as the reason (Stop hook doesn't
+            # support hookSpecificOutput with additionalContext — only reason).
             json.dump({
                 "decision": "block",
-                "hookSpecificOutput": {
-                    "hookEventName": "Stop",
-                    "additionalContext": (
-                        "<cc-remote-approval>\n"
-                        "The user sent a new instruction via the remote messaging channel (Telegram).\n"
-                        "Please execute this instruction:\n\n"
-                        f"{instruction}\n"
-                        "</cc-remote-approval>"
-                    ),
-                }
+                "reason": (
+                    "The user sent a new instruction via the remote messaging channel (Telegram). "
+                    f"Please execute this instruction: {instruction}"
+                ),
             }, sys.stdout)
             sys.stdout.flush()
             sys.exit(0)

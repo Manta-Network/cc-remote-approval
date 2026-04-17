@@ -100,7 +100,7 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | \
 | `context_turns` | 3 | Conversation turns shown in message context |
 | `context_max_chars` | 200 | Max chars per context turn |
 | `stop_hook_enabled` | `true` | Enable Stop hook for remote task continuation. Set `false` to disable. |
-| `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle (local terminal input releases immediately) |
+| `stop_wait_seconds` | 180 | Seconds to wait for remote instruction before allowing idle (local input in Claude Code releases immediately) |
 | `session_hint_enabled` | `true` | Inject SessionStart hint that steers Claude to prefer `AskUserQuestion` tool for option-picking (renders as buttons on channel). Set `false` to let Claude use its natural behavior. |
 
 All values are configurable. You can also override any config field via environment variable with the `CC_REMOTE_APPROVAL_` prefix (e.g., `CC_REMOTE_APPROVAL_SESSION_HINT_ENABLED=false`).

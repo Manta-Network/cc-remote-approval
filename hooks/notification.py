@@ -25,7 +25,10 @@ from utils.channel import create_channel
 _log = make_logger("notification")
 
 MESSAGES = {
-    "idle_prompt": "💤 <b>Agent idle</b>\n\nAgent finished the current task and is waiting for your next instruction.",
+    "idle_prompt": (
+        "💤 <b>Agent idle</b>\n\n"
+        "Agent finished the current task and is waiting for your next instruction in Claude Code."
+    ),
 }
 
 

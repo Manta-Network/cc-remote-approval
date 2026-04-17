@@ -1212,6 +1212,22 @@ class TestStopHookSignalFile:
             f.write("not-a-number")
         assert stop_mod.check_stop_signal("sess-z") is False
 
+    def test_empty_session_id_never_matches(self, tmp_path, monkeypatch):
+        """Empty session_id must not match any signal — avoids cross-session
+        interference with the Notification hook."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        assert stop_mod.check_stop_signal("") is False
+        assert stop_mod.check_stop_signal(None) is False
+
+    def test_empty_session_id_no_signal_written(self, tmp_path, monkeypatch):
+        """_write_signal with empty session_id must not create a file
+        (would interfere with unrelated sessions)."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        stop_mod._write_signal("")
+        assert not os.listdir(str(tmp_path)) if os.path.exists(str(tmp_path)) else True
+
 
 class TestStopHookStatusText:
     """_status_text helper."""
@@ -1363,7 +1379,7 @@ class TestStopHookContinueFlow:
         monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
 
         stdout = io.StringIO()
-        monkeypatch.setattr("sys.stdin", io.StringIO('{}'))
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "sess-test"}'))
         monkeypatch.setattr("sys.stdout", stdout)
 
         with pytest.raises(SystemExit) as exc:
@@ -1371,8 +1387,8 @@ class TestStopHookContinueFlow:
         assert exc.value.code == 0
         # No block decision — stdout should be empty
         assert stdout.getvalue() == ""
-        # Signal file should be written
-        assert os.path.exists(os.path.join(str(tmp_path), "handled"))
+        # Session-scoped signal file should be written
+        assert os.path.exists(os.path.join(str(tmp_path), "handled_sess-test"))
 
 
 class TestStopHookLocalResponse:

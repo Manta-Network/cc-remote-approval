@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """
-Stop hook — intercept Claude before idle, offer remote prompt injection.
+Stop hook — intercept Claude before idle, offer remote task continuation.
 
 When Claude finishes a task and is about to stop:
 1. Send Telegram message with "Continue" / "Dismiss" buttons
-2. Poll for user response (up to POLL_TIMEOUT_SECONDS)
-3. If user sends a new instruction → block stop, inject as additionalContext
-4. If user dismisses or timeout → allow stop (Claude goes idle)
+2. Poll for user response (up to stop_wait_seconds, default 180s)
+3. If user sends a new instruction → block stop, inject via reason field
+4. If user dismisses, presses ESC locally, or times out → allow stop
 
-This replaces the Notification(idle_prompt) for the remote user — a signal
-file prevents the Notification hook from sending a duplicate idle message.
+The terminal race (transcript growth detection) releases immediately when
+the user types in Claude Code. If the user presses ESC inside Claude Code,
+the hook is abandoned by Claude Code (no signal sent) and keeps polling
+in the background until the stop_wait_seconds timeout — the TG message
+then transitions to "Timed out".
+
+A signal file per session prevents the Notification hook from sending a
+duplicate idle message for the same stop.
 """
 import json
 import os
@@ -65,7 +71,7 @@ def main():
     session_tag = _session_tag(event)
     if session_tag:
         text += f" · <code>{html_escape(session_tag)}</code>"
-    text += f"\n\n⏳ Reply within {wait_seconds}s, or Claude will idle."
+    text += f"\n\n⏳ Tap Continue within {wait_seconds}s, or Claude Code will idle."
     text += format_context_block(context_lines)
 
     buttons = [
@@ -82,11 +88,9 @@ def main():
         _log(f"Send failed: {e}")
         sys.exit(0)
 
-    # Track prompt message IDs for cleanup
     prompt_ids = []
 
     # Baseline transcript size for local response detection
-    transcript_path = event.get("transcript_path", "")
     poll_start_size = 0
     if transcript_path:
         try:
@@ -96,10 +100,10 @@ def main():
 
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        # Race: if user types in terminal, transcript grows → release immediately
+        # Race: if user types in Claude Code, transcript grows → release immediately
         if transcript_path and check_local_response(transcript_path, poll_start_size):
             _log("User responded locally, releasing stop")
-            ch.edit_message(msg_id, text=_status_text("🖥 <b>Handled locally</b>", session_tag), buttons=[])
+            ch.edit_message(msg_id, text=_status_text("🖥️ Handled locally", session_tag, context_lines), buttons=[])
             _cleanup_prompts(ch, prompt_ids)
             sys.exit(0)
 
@@ -124,7 +128,7 @@ def main():
 
             elif data == "stop:dismiss":
                 _log("User clicked Dismiss")
-                ch.edit_message(msg_id, text=_status_text("💤 Dismissed", session_tag), buttons=[])
+                ch.edit_message(msg_id, text=_status_text("❌ Dismissed", session_tag, context_lines), buttons=[])
                 _cleanup_prompts(ch, prompt_ids)
                 _write_signal(session_id)
                 sys.exit(0)
@@ -136,12 +140,12 @@ def main():
             _log(f"Received instruction: {instruction[:200]}")
             ch.edit_message(
                 msg_id,
-                text=_status_text(f"✅ New task sent: <code>{html_escape(mask_secrets(instruction[:200]))}</code>", session_tag),
+                text=_status_text(f"✅ New task sent: <code>{html_escape(mask_secrets(instruction[:200]))}</code>", session_tag, context_lines),
                 buttons=[],
             )
             _cleanup_prompts(ch, prompt_ids)
-            # Block stop, inject instruction as the reason (Stop hook doesn't
-            # support hookSpecificOutput with additionalContext — only reason).
+            # Block stop, inject instruction via `reason` (Stop hook schema
+            # doesn't support hookSpecificOutput.additionalContext).
             json.dump({
                 "decision": "block",
                 "reason": (
@@ -152,9 +156,9 @@ def main():
             sys.stdout.flush()
             sys.exit(0)
 
-    # Timeout — no one responded on TG or terminal
+    # Timeout — no one responded on TG or locally
     _log("Timeout")
-    ch.edit_message(msg_id, text=_status_text("💤 Timed out", session_tag), buttons=[])
+    ch.edit_message(msg_id, text=_status_text("⏰ Timed out", session_tag, context_lines), buttons=[])
     _cleanup_prompts(ch, prompt_ids)
     _write_signal(session_id)
     sys.exit(0)
@@ -168,11 +172,15 @@ def _session_tag(event):
     return None
 
 
-def _status_text(status, session_tag=None):
-    """Build a short resolved-state message."""
-    text = f"<b>{status}</b>"
+def _status_text(status, session_tag=None, context_lines=None):
+    """Build a resolved-state message — keeps the "Agent idle" title and
+    appends the status inline so users can tell at a glance which event
+    this is."""
+    text = f"💤 <b>Agent idle</b> · {status}"
     if session_tag:
         text += f" · <code>{html_escape(session_tag)}</code>"
+    if context_lines:
+        text += format_context_block(context_lines)
     return text
 
 
@@ -183,10 +191,14 @@ def _cleanup_prompts(ch, prompt_ids):
 
 
 def _write_signal(session_id):
-    """Write session-scoped signal file so Notification hook skips duplicate idle message."""
+    """Write session-scoped signal file so Notification hook skips duplicate idle message.
+    No-op when session_id is empty — otherwise a global "handled" file would
+    interfere with unrelated sessions' Notification hooks."""
+    if not session_id:
+        _log("No session_id; skipping signal write to avoid cross-session interference")
+        return
     os.makedirs(STOP_SIGNAL_DIR, exist_ok=True)
-    fname = f"handled_{session_id}" if session_id else "handled"
-    signal_path = os.path.join(STOP_SIGNAL_DIR, fname)
+    signal_path = os.path.join(STOP_SIGNAL_DIR, f"handled_{session_id}")
     with open(signal_path, "w") as f:
         f.write(str(time.time()))
     _log(f"Wrote signal file: {signal_path}")
@@ -196,8 +208,9 @@ def check_stop_signal(session_id=""):
     """Check if Stop hook recently handled the idle event for this session.
     Called by notification.py to avoid duplicate idle messages.
     Returns True if signal is fresh (within TTL)."""
-    fname = f"handled_{session_id}" if session_id else "handled"
-    signal_path = os.path.join(STOP_SIGNAL_DIR, fname)
+    if not session_id:
+        return False
+    signal_path = os.path.join(STOP_SIGNAL_DIR, f"handled_{session_id}")
     try:
         with open(signal_path) as f:
             ts = float(f.read().strip())

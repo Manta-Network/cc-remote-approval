@@ -64,7 +64,7 @@ def main():
     transcript_path = event.get("transcript_path", "")
     context_lines = format_context_lines(
         transcript_path,
-        max_turns=1,
+        max_turns=cfg["context_turns"],
         max_chars=cfg["context_max_chars"],
     )
 
@@ -102,9 +102,12 @@ def main():
         ch.edit_message(msg_id, text=_status_text(status, session_tag, context_lines), buttons=[])
         _cleanup_prompts(ch, prompt_ids)
 
+    def local_response():
+        return transcript_path and check_local_response(transcript_path, poll_start_size)
+
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
-        if transcript_path and check_local_response(transcript_path, poll_start_size):
+        if local_response():
             _log("User responded locally, releasing stop")
             resolve("🖥️ Handled locally")
             sys.exit(0)
@@ -114,18 +117,30 @@ def main():
             time.sleep(1)
             continue
 
+        # Close TOCTOU: local action may have happened in parallel with poll.
+        if local_response():
+            _log("User responded locally (parallel with callback), releasing stop")
+            resolve("🖥️ Handled locally")
+            sys.exit(0)
+
         if update["type"] == "callback":
             data = update["data"]
 
             if data == "stop:continue":
                 _log("User clicked Continue")
-                ch.edit_message(msg_id, text=_status_text("⏳ Waiting for instruction...", session_tag), buttons=[])
+                # Send the ForceReply prompt FIRST so we only commit to the
+                # transition if it succeeds. On failure, leave the original
+                # Continue/Dismiss buttons intact so the user can retry or
+                # dismiss instead of being stranded.
                 prompt_msg_id = ch.send_reply_prompt(
                     msg_id,
                     "💬 Reply with your next instruction:",
                 )
-                if prompt_msg_id:
-                    prompt_ids.append(prompt_msg_id)
+                if not prompt_msg_id:
+                    _log("send_reply_prompt failed; keeping original buttons")
+                    continue
+                prompt_ids.append(prompt_msg_id)
+                ch.edit_message(msg_id, text=_status_text("⏳ Waiting for instruction...", session_tag), buttons=[])
                 continue
 
             elif data == "stop:dismiss":

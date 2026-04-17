@@ -40,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 208 automated tests
+├── test/                        # 212 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -112,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 208 tests, ~0.1s
+pytest test/ -v    # 212 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -174,7 +174,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | Scope | Coverage |
 |---|---|
 | Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **208 tests in ~0.1s** |
+| Automated tests | **212 tests in ~0.1s** |
 | All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards
@@ -250,6 +250,7 @@ Things that aren't obvious from reading the code — invariants, external constr
 5. **Same-server concurrent elicitation** — `ElicitationResult` has no request-level ID, so filling one form locally signals "handled locally" to **all** active requests from that MCP server. Accepted trade-off since concurrent elicitations from the same server are rare.
 6. **Text replies require quote-reply anchoring** — `poll.py` routes incoming text by `reply_to_message.message_id`. Bare text is dropped so concurrent hooks don't steal each other's replies. `send_reply_prompt` uses Telegram's `ForceReply` to make quoting automatic (works in notification quick-reply, Apple Watch, etc.).
 7. **No end-of-turn question detection** — Claude Code doesn't expose a "this turn was a question" signal, and heuristic regex detection proved too fragile. We steer the model toward the `AskUserQuestion` tool via `SessionStart additionalContext` instead. The Stop hook's `{decision: block, reason}` mechanism is for **user-driven** remote continuation (user taps Continue) — different use case from auto-question-detection.
+8. **ESC in Claude Code sends SIGKILL to hooks** — cancelling a pending permission/question locally kills the polling hook with an uncatchable signal, so the channel message keeps its buttons until the user resolves it on the channel.
 
 ## Adding a New Channel
 

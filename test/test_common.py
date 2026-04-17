@@ -290,9 +290,9 @@ class TestExtractLastMessages:
     def test_returns_empty_for_empty_path(self):
         assert extract_last_messages("") == []
 
-    def test_strips_system_tags_from_user_messages(self, tmp_path):
-        """Slash-command invocations and local-command caveats are system
-        plumbing; they shouldn't leak into channel context previews."""
+    def test_strips_tags_preserving_inner_content(self, tmp_path):
+        """Tags are removed but inner text is preserved — filter leaves
+        user intent intact while dropping the XML plumbing."""
         transcript = tmp_path / "t.jsonl"
         wrapped = (
             "<command-name>/reload-plugins</command-name>\n"
@@ -306,19 +306,29 @@ class TestExtractLastMessages:
         msgs = extract_last_messages(str(transcript))
         assert len(msgs) == 1
         assert "切换到 main 分支吧？" in msgs[0]["text"]
-        assert "command-name" not in msgs[0]["text"]
-        assert "reload-plugins" not in msgs[0]["text"]
+        # Tag markers gone…
+        assert "<command-name>" not in msgs[0]["text"]
+        assert "</command-name>" not in msgs[0]["text"]
+        # …but inner content preserved
+        assert "/reload-plugins" in msgs[0]["text"]
 
-    def test_skips_message_that_is_only_system_tags(self, tmp_path):
-        """If a user message is nothing but tagged plumbing, skip it
-        entirely rather than showing an empty line."""
+    def test_strips_local_command_and_system_variants(self, tmp_path):
+        """Covers <(local-)command-*> and <system-*> variants — tags go,
+        inner text stays."""
         transcript = tmp_path / "t.jsonl"
-        lines = [
-            json.dumps({"message": {"role": "user", "content":
-                "<system-reminder>Reminder: do X</system-reminder>"}}),
-            json.dumps({"message": {"role": "user", "content": "real instruction"}}),
-        ]
-        transcript.write_text("\n".join(lines))
+        wrapped = (
+            "<local-command-stdout>(no content)</local-command-stdout>\n"
+            "<system-session-start>Injected preamble</system-session-start>\n"
+            "怎么还有标签？"
+        )
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": wrapped}
+        }))
         msgs = extract_last_messages(str(transcript))
         assert len(msgs) == 1
-        assert msgs[0]["text"] == "real instruction"
+        assert "怎么还有标签？" in msgs[0]["text"]
+        assert "<local-command-stdout>" not in msgs[0]["text"]
+        assert "<system-session-start>" not in msgs[0]["text"]
+        # Inner text preserved
+        assert "(no content)" in msgs[0]["text"]
+        assert "Injected preamble" in msgs[0]["text"]

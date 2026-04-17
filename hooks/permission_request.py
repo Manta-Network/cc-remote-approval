@@ -146,6 +146,12 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
             time.sleep(1)
             continue
 
+        # Close the TOCTOU window: transcript may have grown between the
+        # last check and now. If the user responded locally, don't overwrite
+        # their decision with the channel callback that arrived in parallel.
+        if check_local_response(transcript_path, poll_start_size, threshold=100):
+            return "local", None
+
         if update["type"] == "callback":
             data = update["data"]
             if not data.startswith("opt:"):
@@ -227,6 +233,10 @@ def poll_callback(ch, message_id, transcript_path="", poll_start_size=0):
 
         update = ch.poll(message_id)
         if update and update["type"] == "callback":
+            # Re-check to catch local activity that happened in parallel
+            # with the channel callback.
+            if check_local_response(transcript_path, poll_start_size, threshold=100):
+                return "local"
             return update["data"]
 
         time.sleep(1)

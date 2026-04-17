@@ -426,6 +426,24 @@ class TestExtractContext:
         assert "no time" in result[0]
         assert "[" not in result[0]  # no time bracket when timestamp missing
 
+    def test_flattens_multiline_content_to_single_line(self, tmp_path):
+        """Multi-line user input should render as a clean one-liner in
+        channel context previews — collapse newlines + repeated whitespace
+        to single spaces."""
+        from utils.common import format_context_lines
+        transcript = tmp_path / "t.jsonl"
+        multiline = "line one\n\nline two\n\tindented line three"
+        transcript.write_text(json.dumps(
+            {"message": {"role": "user", "content": multiline}}
+        ))
+        result = format_context_lines(str(transcript))
+        assert len(result) == 1
+        # No newlines or tabs in the rendered line
+        assert "\n" not in result[0]
+        assert "\t" not in result[0]
+        # All three segments are present, joined by single spaces
+        assert "line one line two indented line three" in result[0]
+
 
 # --- edit_message_resolved ---
 
@@ -1164,6 +1182,65 @@ class TestElicitationResponseHandoff:
 # Notification tests are in test_integration.py (TestNotificationFlow)
 
 
+class TestLocalResponseRaceAfterCallback:
+    """Defense against a TOCTOU race: local transcript grows between the
+    last check_local_response and ch.poll() returning a callback. Without
+    the re-check, we'd return the remote decision and overwrite what the
+    user just did locally."""
+
+    def test_poll_callback_returns_local_when_transcript_grew_after_poll(self, tmp_path, monkeypatch):
+        """poll_callback must re-check check_local_response after the channel
+        returns a callback, and return 'local' if the transcript grew."""
+        from permission_request import poll_callback
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 1000)
+        baseline = 1000
+
+        ch = FakeChannel()
+        # Simulate: poll returns a callback immediately
+        poll_count = {"n": 0}
+        def fake_poll(msg_id):
+            poll_count["n"] += 1
+            if poll_count["n"] == 1:
+                # First poll: return a callback
+                # But also grow transcript in parallel, to simulate local response
+                transcript.write_text("x" * 5000)
+                return {"type": "callback", "data": "allow"}
+            return None
+        ch.poll = fake_poll
+
+        result = poll_callback(ch, message_id=100,
+                               transcript_path=str(transcript),
+                               poll_start_size=baseline)
+        # Should detect the parallel local growth and return "local"
+        assert result == "local"
+
+    def test_poll_question_answer_returns_local_when_transcript_grew(self, tmp_path):
+        from permission_request import poll_question_answer
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 1000)
+        baseline = 1000
+
+        ch = FakeChannel()
+        poll_count = {"n": 0}
+        def fake_poll(msg_ids):
+            poll_count["n"] += 1
+            if poll_count["n"] == 1:
+                transcript.write_text("x" * 5000)
+                return {"type": "callback", "data": "opt:0"}
+            return None
+        ch.poll = fake_poll
+
+        options = [{"label": "Yes", "description": ""}, {"label": "No", "description": ""}]
+        result = poll_question_answer(
+            ch, message_id=100, options=options, multi=False,
+            transcript_path=str(transcript), poll_start_size=baseline,
+        )
+        assert result == ("local", None)
+
+
 # --- Stop hook ---
 
 class TestStopHookSignalFile:
@@ -1366,6 +1443,46 @@ class TestStopHookContinueFlow:
         assert len(calls) == 1
         assert isinstance(calls[0]["msg_id"], int)
         assert "instruction" in calls[0]["text"].lower()
+
+    def test_continue_prompt_send_failure_keeps_buttons(self, monkeypatch, tmp_path):
+        """If send_reply_prompt fails, original Continue/Dismiss buttons must
+        stay so the user can retry or dismiss — not be stranded waiting."""
+        import hooks.stop as stop_mod
+        import io
+
+        edits = []
+        class FailingPromptChannel(_PollableFakeChannel):
+            def send_reply_prompt(self, msg_id, text, force_reply=True):
+                return None  # simulate transport failure
+            def edit_message(self, msg_id, text, buttons=None, parse_mode="HTML"):
+                edits.append({"text": text, "buttons": buttons})
+                super().edit_message(msg_id, text, buttons, parse_mode)
+
+        ch = FailingPromptChannel()
+        # After Continue fails, user clicks Dismiss on the still-present buttons
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "callback", "data": "stop:dismiss"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "sess-retry"}'))
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+
+        with pytest.raises(SystemExit):
+            stop_mod.main()
+
+        # No edit should have transitioned to "Waiting for instruction..."
+        # because the prompt send failed.
+        waiting_edits = [e for e in edits if "Waiting for instruction" in e["text"]]
+        assert not waiting_edits, \
+            "Continue path edited to 'Waiting' despite send_reply_prompt failing"
+        # Dismiss must have resolved normally (edit happened for Dismissed).
+        dismiss_edits = [e for e in edits if "Dismissed" in e["text"]]
+        assert dismiss_edits, "Dismiss flow should still work after failed Continue"
 
     def test_dismiss_allows_idle(self, monkeypatch, tmp_path):
         """Click Dismiss → allow idle, write signal file."""

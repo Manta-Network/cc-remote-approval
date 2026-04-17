@@ -303,8 +303,8 @@ def _activate_terminal():
 def _edit_terminal_fallback(ch, msg_id, message, fields, form_data):
     """Update message: timeout, please fill on terminal."""
     text = (
-        f"⏰ <b>Please fill the form in terminal</b>\n\n"
-        f"The form is now showing in your terminal.\n\n"
+        f"⏰ <b>Please fill the form in Claude Code</b>\n\n"
+        f"The form is now showing in Claude Code.\n\n"
         f"<i>{html_escape(message)}</i>"
     )
     if form_data:

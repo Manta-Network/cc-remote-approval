@@ -110,7 +110,7 @@ ls "$TG"/*.corrupt-* 2>/dev/null || echo "  none"
 
 ```bash
 LOGS=$(python3 -c 'import tempfile,os; print(os.path.join(tempfile.gettempdir(), "cc-remote-approval/logs"))')
-for h in permission_request notification elicitation session_start; do
+for h in permission_request notification elicitation stop session_start; do
   f="$LOGS/$h.log"
   if [ -f "$f" ]; then
     echo "=== $h (last 3 lines) ==="
@@ -128,6 +128,7 @@ cc-remote-approval status:
   ✅ config file readable
   ✅ bot @xxxxx responds to getMe
   ✅ chat_id 123456 reachable
+  ℹ️  stop_hook_enabled=false (default — enable for remote task continuation)
   ✅ session_hint_enabled=true (AskUserQuestion steering active)
   ⚠️  1 corrupt state file from 2026-04-14 — safe to delete
   ℹ️  last permission_request hook fired 2h ago

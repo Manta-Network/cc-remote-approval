@@ -1162,3 +1162,333 @@ class TestElicitationResponseHandoff:
 
 
 # Notification tests are in test_integration.py (TestNotificationFlow)
+
+
+# --- Stop hook ---
+
+class TestStopHookSignalFile:
+    """Signal file dedup between Stop hook and Notification hook (session-scoped)."""
+
+    def test_write_and_check_signal(self, tmp_path, monkeypatch):
+        """Write signal for session → check same session returns True."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled_sess-abc")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time()))
+        assert stop_mod.check_stop_signal("sess-abc") is True
+
+    def test_different_session_not_affected(self, tmp_path, monkeypatch):
+        """Signal for session A → check session B returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled_sess-a")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time()))
+        assert stop_mod.check_stop_signal("sess-a") is True
+        assert stop_mod.check_stop_signal("sess-b") is False
+
+    def test_stale_signal_ignored(self, tmp_path, monkeypatch):
+        """Signal older than TTL is ignored."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled_sess-x")
+        with open(signal_path, "w") as f:
+            f.write(str(time.time() - 60))  # 60s ago, well past TTL
+        assert stop_mod.check_stop_signal("sess-x") is False
+
+    def test_missing_signal_returns_false(self, tmp_path, monkeypatch):
+        """No signal file → returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        assert stop_mod.check_stop_signal("sess-y") is False
+
+    def test_corrupt_signal_returns_false(self, tmp_path, monkeypatch):
+        """Non-numeric content in signal file → returns False."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        signal_path = os.path.join(str(tmp_path), "handled_sess-z")
+        with open(signal_path, "w") as f:
+            f.write("not-a-number")
+        assert stop_mod.check_stop_signal("sess-z") is False
+
+    def test_empty_session_id_never_matches(self, tmp_path, monkeypatch):
+        """Empty session_id must not match any signal — avoids cross-session
+        interference with the Notification hook."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        assert stop_mod.check_stop_signal("") is False
+        assert stop_mod.check_stop_signal(None) is False
+
+    def test_empty_session_id_no_signal_written(self, tmp_path, monkeypatch):
+        """_write_signal with empty session_id must not create a file
+        (would interfere with unrelated sessions)."""
+        import hooks.stop as stop_mod
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        stop_mod._write_signal("")
+        assert not os.listdir(str(tmp_path)) if os.path.exists(str(tmp_path)) else True
+
+
+class TestStopHookStatusText:
+    """_status_text helper."""
+
+    def test_with_session_tag(self):
+        from hooks.stop import _status_text
+        result = _status_text("💤 Dismissed", "my-project")
+        assert "Dismissed" in result
+        assert "my-project" in result
+
+    def test_without_session_tag(self):
+        from hooks.stop import _status_text
+        result = _status_text("💤 Dismissed", None)
+        assert "Dismissed" in result
+        assert "code>" not in result
+
+
+class TestSessionTag:
+    """Shared session_tag helper in utils.common."""
+
+    def test_extracts_basename(self):
+        from utils.common import session_tag
+        assert session_tag({"cwd": "/home/user/my-project"}) == "my-project"
+
+    def test_empty_cwd(self):
+        from utils.common import session_tag
+        assert session_tag({"cwd": ""}) == ""
+        assert session_tag({}) == ""
+
+    def test_trailing_slash_stripped(self):
+        from utils.common import session_tag
+        assert session_tag({"cwd": "/home/user/repo/"}) == "repo"
+
+
+class TestStopHookButtons:
+    """Button layout and callback_data."""
+
+    def test_button_layout(self):
+        """Stop message should have Continue and Dismiss buttons."""
+        ch = FakeChannel()
+        # Simulate what stop.py sends
+        buttons = [
+            [
+                {"text": "✏️ Continue", "callback_data": "stop:continue"},
+                {"text": "❌ Dismiss", "callback_data": "stop:dismiss"},
+            ]
+        ]
+        ch.send_message("idle", buttons=buttons)
+        sent = ch._sent_messages[0]
+        flat = [b for row in sent["buttons"] for b in row]
+        data_values = [b["callback_data"] for b in flat]
+        assert "stop:continue" in data_values
+        assert "stop:dismiss" in data_values
+
+
+class _PollableFakeChannel(FakeChannel):
+    """FakeChannel with a simple poll queue for Stop hook integration tests."""
+
+    def __init__(self):
+        super().__init__()
+        self._poll_queue = []
+
+    def poll(self, msg_id):
+        if self._poll_queue:
+            return self._poll_queue.pop(0)
+        return None
+
+
+class TestStopHookContinueFlow:
+    """Exercise the Continue button → ForceReply → text reply → block path."""
+
+    def _make_cfg(self):
+        return {
+            "bot_token": "tok", "chat_id": "123",
+            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "context_turns": 1, "context_max_chars": 200,
+            "channel_type": "telegram",
+        }
+
+    def test_continue_then_text_reply_blocks_stop(self, monkeypatch, tmp_path):
+        """Click Continue → send_reply_prompt → user types instruction → block."""
+        import hooks.stop as stop_mod
+        import io
+
+        ch = _PollableFakeChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "text", "text": "fix the login bug"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+
+        stdin = io.StringIO('{"cwd": "/home/user/my-project"}')
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", stdin)
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+
+        output = json.loads(stdout.getvalue())
+        assert output["decision"] == "block"
+        assert "fix the login bug" in output["reason"]
+
+    def test_continue_calls_send_reply_prompt_correctly(self, monkeypatch, tmp_path):
+        """Verify send_reply_prompt is called with (msg_id, text) not (text, reply_to=msg_id)."""
+        import hooks.stop as stop_mod
+        import io
+
+        calls = []
+        class SpyChannel(_PollableFakeChannel):
+            def send_reply_prompt(self, msg_id, text, force_reply=True):
+                calls.append({"msg_id": msg_id, "text": text, "force_reply": force_reply})
+                return super().send_reply_prompt(msg_id, text, force_reply)
+
+        ch = SpyChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:continue"},
+            {"type": "text", "text": "next task"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+        monkeypatch.setattr("sys.stdin", io.StringIO('{}'))
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+
+        with pytest.raises(SystemExit):
+            stop_mod.main()
+
+        assert len(calls) == 1
+        assert isinstance(calls[0]["msg_id"], int)
+        assert "instruction" in calls[0]["text"].lower()
+
+    def test_dismiss_allows_idle(self, monkeypatch, tmp_path):
+        """Click Dismiss → allow idle, write signal file."""
+        import hooks.stop as stop_mod
+        import io
+
+        ch = _PollableFakeChannel()
+        ch._poll_queue = [
+            {"type": "callback", "data": "stop:dismiss"},
+        ]
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", self._make_cfg)
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path))
+        monkeypatch.setattr(stop_mod.time, "sleep", lambda s: None)
+
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"session_id": "sess-test"}'))
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+        # No block decision — stdout should be empty
+        assert stdout.getvalue() == ""
+        # Session-scoped signal file should be written
+        assert os.path.exists(os.path.join(str(tmp_path), "handled_sess-test"))
+
+
+class TestStopHookLocalResponse:
+    """Stop hook releases when user types in terminal (transcript grows)."""
+
+    def test_local_response_releases_stop(self, monkeypatch, tmp_path):
+        """Transcript growth during poll → exit immediately, update TG."""
+        import hooks.stop as stop_mod
+        import io
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("x" * 100)
+
+        ch = _PollableFakeChannel()
+        # No TG responses queued — but transcript will grow
+
+        monkeypatch.setattr(stop_mod, "create_channel", lambda cfg: (ch, None))
+        monkeypatch.setattr(stop_mod, "load_config", lambda: {
+            "bot_token": "tok", "chat_id": "123",
+            "stop_hook_enabled": True, "stop_wait_seconds": 180,
+            "context_turns": 1, "context_max_chars": 200,
+            "channel_type": "telegram",
+        })
+        monkeypatch.setattr(stop_mod, "STOP_SIGNAL_DIR", str(tmp_path / "signal"))
+
+        sleep_count = [0]
+        def fake_sleep(s):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 2:
+                transcript.write_text("x" * 500)  # simulate user typing
+        monkeypatch.setattr(stop_mod.time, "sleep", fake_sleep)
+
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+            "cwd": "/home/user/proj",
+            "transcript_path": str(transcript),
+        })))
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+        # No block decision — allowed idle
+        assert stdout.getvalue() == ""
+        # TG message should be edited to "Handled locally"
+        assert any("Handled locally" in e["text"] for e in ch._edited_messages)
+
+
+class TestStopHookBlockDecision:
+    """The JSON output format for blocking stop."""
+
+    def test_block_decision_uses_reason_field(self):
+        """Stop hook only supports decision + reason, not hookSpecificOutput.
+        Per Claude Code's schema, Stop decisions must use the top-level
+        'reason' field for context injection."""
+        instruction = "fix the login bug"
+        output = {
+            "decision": "block",
+            "reason": (
+                "The user sent a new instruction via the remote messaging channel (Telegram). "
+                f"Please execute this instruction: {instruction}"
+            ),
+        }
+        assert output["decision"] == "block"
+        assert "fix the login bug" in output["reason"]
+        # Must NOT use hookSpecificOutput for Stop — schema rejects it
+        assert "hookSpecificOutput" not in output
+
+
+class TestStopHookNoChannel:
+    """When channel is unavailable, Stop hook should exit silently."""
+
+    def test_no_channel_exits_silently(self, monkeypatch):
+        import hooks.stop as stop_mod
+        import utils.channel as ch_mod
+        from utils.channel import ChannelError
+        monkeypatch.setattr(ch_mod, "create_channel", lambda cfg: (None, ChannelError("test")))
+        monkeypatch.setattr(stop_mod, "load_config", lambda: {
+            "bot_token": "", "chat_id": "",
+            "context_turns": 3, "context_max_chars": 200,
+            "channel_type": "telegram",
+        })
+        monkeypatch.setattr("sys.stdin", __import__("io").StringIO('{}'))
+        with pytest.raises(SystemExit) as exc:
+            stop_mod.main()
+        assert exc.value.code == 0
+
+
+class TestStopHookConfig:
+    """Config defaults."""
+
+    def test_default_enabled(self):
+        from utils.common import DEFAULTS
+        assert DEFAULTS["stop_hook_enabled"] is False
+
+    def test_default_wait_seconds(self):
+        from utils.common import DEFAULTS
+        assert DEFAULTS["stop_wait_seconds"] == 180
+

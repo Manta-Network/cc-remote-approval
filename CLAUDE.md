@@ -26,6 +26,7 @@ cc-remote-approval/
 │   ├── elicitation.py           # Elicitation — MCP form hook (hybrid mode)
 │   ├── elicitation_result.py    # ElicitationResult — local form completion signal
 │   ├── notification.py          # Notification — idle alert
+│   ├── stop.py                  # Stop — remote prompt injection when idle
 │   └── session_start.py         # SessionStart — AskUserQuestion preference hint injection
 ├── utils/                       # Shared utilities (channel-agnostic)
 │   ├── common.py                # Config, masking, logging, IPC helpers
@@ -39,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 169 automated tests
+├── test/                        # 208 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -79,9 +80,10 @@ create_channel(cfg) reads cfg["channel_type"] and returns the right implementati
 | `hooks/permission_request.py` | Sleep N seconds → detect local response → if none, send via channel → poll for callback → return decision |
 | `hooks/elicitation.py` | Fork: child sends form immediately (with timeout countdown hint), parent blocks 60s. Channel responds → return data; timeout → show local form + activate terminal. Boolean defaults applied at submit, not pre-filled. Resolved messages include form title + submitted values. |
 | `hooks/elicitation_result.py` | User fills form locally → write signal file → child updates channel |
-| `hooks/notification.py` | Fire-and-forget: send notification when agent is idle |
+| `hooks/stop.py` | Intercept before idle → send TG with Continue/Dismiss buttons → poll for new instruction → block stop with `reason` (injects as continuation directive) or allow idle. Signal file dedup with Notification hook. |
+| `hooks/notification.py` | Fire-and-forget: send notification when agent is idle. Skips if Stop hook recently handled. |
 | `hooks/session_start.py` | Fires on new session — injects a system-context hint steering Claude to prefer the `AskUserQuestion` tool over free-text option lists (structured tool = reliable button UI on the channel, no heuristic parsing needed). Only fires when a channel is configured. |
-| `utils/common.py` | Config loading, secret masking, HTML escaping, logging, local response detection |
+| `utils/common.py` | Config loading, secret masking, HTML escaping, logging, local response detection, session_tag helper, transcript context extraction (strips Claude Code's `<system-reminder>` / `<command-name>` / `<local-command-caveat>` wrappers so only real user intent appears in channel previews) |
 | `utils/channel.py` | Channel interface + factory. Hooks call `ch.send_message()`, `ch.poll()`, `ch.edit_message()` |
 | `channels/telegram/client.py` | TelegramChannel: Bot API via urllib, token in-process |
 | `channels/telegram/poll.py` | Coordinated getUpdates: flock + pending.json queue (5-min TTL) for concurrent hooks |
@@ -97,6 +99,8 @@ All hooks read from `~/.cc-remote-approval/config.json`:
   "chat_id": "Your chat ID",
   "escalation_seconds": 20,
   "elicitation_timeout": 60,
+  "stop_hook_enabled": false,
+  "stop_wait_seconds": 180,
   "context_turns": 3,
   "context_max_chars": 200,
   "session_hint_enabled": true
@@ -108,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 188 tests, ~0.1s
+pytest test/ -v    # 208 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -156,21 +160,22 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | 13 | **MCP form (Elicitation)** | Elicitation | ✅ | Hybrid: channel direct or timeout → local form. Shows timeout countdown hint; resolved messages include form title |
 | 14 | **Prompt change** | PromptRequest | ❌ | Not implemented |
 | 15 | **PreToolUse intercept** | PreToolUse | ❌ | Not implemented |
-| 16 | **Idle waiting** | Notification | ✅ | idle_prompt |
+| 16 | **Idle waiting** | Notification | ✅ | idle_prompt (skipped when Stop hook handles) |
 | 17 | **Permission dialog (`permission_prompt`)** | Notification | 🚫 | Intentionally suppressed — PermissionRequest hook already sends a richer actionable message for the same event |
 | 18 | **System-prompt nudge toward `AskUserQuestion`** | SessionStart | ✅ | Injected automatically when channel is configured — steers the model to use the structured tool (with buttons) instead of free-text numbered lists when presenting choices |
+| 19 | **Remote task continuation** | Stop | ✅ | Intercept before idle → Continue/Dismiss buttons → user sends new instruction via TG → block stop with `reason` as continuation directive |
 
 ### B. Non-Hookable (Claude Code doesn't expose hooks)
 
-#18-29: MCP Server approval, API Key, Worktree, OAuth, Session resume, etc. — require Claude Code to add hook support.
+#20-30: MCP Server approval, API Key, Worktree, OAuth, Session resume, etc. — require Claude Code to add hook support.
 
 ### Summary
 
 | Scope | Coverage |
 |---|---|
-| Hookable scenarios (#1-17) | **14/17 (82%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **188 tests in ~0.1s** |
-| All UI scenarios (#1-29) | **14/29 (48%)** |
+| Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
+| Automated tests | **208 tests in ~0.1s** |
+| All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards
 
@@ -217,9 +222,15 @@ $TMPDIR/cc-remote-approval/                  # Temporary (OS-managed)
 │   └── {request_id}.done                    # elicitation_result → child: user filled locally
 │                                            # Lifecycle: <1 min, deleted by child on exit
 │
+├── stop/                                    # Stop hook signal files (session-scoped)
+│   └── handled_{session_id}                 # Timestamp — Notification hook skips if fresh (<30s)
+│                                            # Session-scoped so concurrent sessions don't dedup each other
+│                                            # Lifecycle: overwritten each time Stop hook resolves for that session
+│
 └── logs/                                    # Debug logs (PID-tagged for multi-session)
     ├── permission_request.log               # Lifecycle: auto-rotate at 1MB (keep last 512KB)
     ├── elicitation.log                      # Lifecycle: auto-rotate at 1MB
+    ├── stop.log                             # Lifecycle: auto-rotate at 1MB
     └── notification.log                     # Lifecycle: auto-rotate at 1MB
 ```
 
@@ -230,13 +241,15 @@ On Linux, `$TMPDIR` = `/tmp` (cleaned on reboot on most distros).
 
 ## Known Issues & Design Boundaries
 
-1. **Hook timeout in hooks.json** (seconds) — interactive hooks (PermissionRequest, Elicitation) are `259200` (3 days) since they wait for remote interaction. Fire-and-forget hooks: Notification `30` (covers 15s HTTP timeout), ElicitationResult `5` (filesystem only). Poll loops use the same 3-day internal timeout (`POLL_TIMEOUT_SECONDS` in common.py), not exposed to users.
-2. **Elicitation hook is serial** (hook must exit before form shows) — cannot truly run in parallel like PermissionRequest
-3. **Session-level auto-allow** — after clicking Always, similar operations won't trigger hooks (expected Claude Code behavior)
-4. **Telegram getUpdates global offset** — concurrent hooks must use coordinated polling, otherwise they consume each other's updates
-5. **Same-server concurrent elicitation** — when the user fills a form locally, `ElicitationResult` signals ALL active requests from that MCP server as "handled locally". This is intentional: Claude Code doesn't provide a request-level correlation ID in ElicitationResult events, so we cannot distinguish which specific form was filled. If a single MCP server triggers multiple concurrent forms, filling one locally will cancel all pending remote forms for that server. This is an acceptable trade-off since concurrent elicitation from the same server is rare in practice.
-6. **Text replies require quote-reply anchoring** — `poll.py` routes text messages to the originating hook via `reply_to_message.message_id`. Bare text (no quote) is intentionally dropped to prevent concurrent hooks from stealing each other's replies. To make this ergonomic, `send_reply_prompt` uses Telegram's `ForceReply` reply markup, which auto-locks the user's input box to "reply to this message" mode — including notification quick-reply and Apple Watch, where swipe-to-quote isn't available. The `poll()` interface accepts a **list** of msg_ids: the AskUserQuestion "Other" flow appends the prompt msg_id so replies quoted against either the question or the prompt route to the same hook. Transient prompts are tracked in `state["prompt_ids"]` and deleted via `ch.delete_message()` on every exit path (normal resolve, signal handler, atexit), so users never see a stranded "Reply to this message" lock on an already-handled request.
-7. **No end-of-turn question relay** — Claude Code has no structured "this turn was a question" signal. Instead of heuristic-parsing the last assistant message, we steer the model toward the `AskUserQuestion` tool via `SessionStart` `additionalContext`. The tool routes through PermissionRequest and already has a solid button UI. We prototyped a Stop-hook approach with regex detection and `{decision: block, reason}` injection, but removed it — heuristics were too approximate across languages/phrasings, and the SessionStart nudge eliminates the need when the model picks the right tool.
+Things that aren't obvious from reading the code — invariants, external constraints, and accepted trade-offs.
+
+1. **Hook timeouts** — interactive hooks (PermissionRequest, Elicitation, Stop) are set to 3 days in `hooks.json`; fire-and-forget hooks (Notification, ElicitationResult) are seconds. Poll loops internally use `POLL_TIMEOUT_SECONDS` (3 days) as the matching safety net.
+2. **Elicitation hook is serial** — unlike PermissionRequest, the Elicitation hook must exit before the native form shows, so it can't truly run in parallel. This is why `elicitation.py` forks: the parent blocks briefly to capture channel responses, the child keeps polling in the background.
+3. **Session-level auto-allow** — after clicking "Always", similar operations stop triggering hooks. Expected Claude Code behavior, not a bug we can override.
+4. **Telegram getUpdates is a single global cursor** — concurrent hooks must go through the coordinated `poll_once()` (flock + `pending.json` queue), otherwise one hook's `getUpdates` consumes another hook's updates.
+5. **Same-server concurrent elicitation** — `ElicitationResult` has no request-level ID, so filling one form locally signals "handled locally" to **all** active requests from that MCP server. Accepted trade-off since concurrent elicitations from the same server are rare.
+6. **Text replies require quote-reply anchoring** — `poll.py` routes incoming text by `reply_to_message.message_id`. Bare text is dropped so concurrent hooks don't steal each other's replies. `send_reply_prompt` uses Telegram's `ForceReply` to make quoting automatic (works in notification quick-reply, Apple Watch, etc.).
+7. **No end-of-turn question detection** — Claude Code doesn't expose a "this turn was a question" signal, and heuristic regex detection proved too fragile. We steer the model toward the `AskUserQuestion` tool via `SessionStart additionalContext` instead. The Stop hook's `{decision: block, reason}` mechanism is for **user-driven** remote continuation (user taps Continue) — different use case from auto-question-detection.
 
 ## Adding a New Channel
 

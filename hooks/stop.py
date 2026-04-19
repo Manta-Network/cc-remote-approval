@@ -82,7 +82,7 @@ def main():
             {"text": "❌ Dismiss", "callback_data": "stop:dismiss"},
         ]]
         if show_more:
-            rows.append([{"text": "📖 More context", "callback_data": "stop:more"}])
+            rows.append([{"text": "📖 Full context", "callback_data": "stop:more"}])
         return rows
 
     buttons = _build_buttons()

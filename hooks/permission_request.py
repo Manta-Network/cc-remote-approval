@@ -120,7 +120,7 @@ def _build_question_keyboard(options, multi, selected=None, show_more=True):
         rows.append([{"text": "✅ Submit", "callback_data": "opt:submit"}])
     rows.append([{"text": "✏️ Other", "callback_data": "opt:other"}])
     if show_more:
-        rows.append([{"text": "📖 More context", "callback_data": "opt:more"}])
+        rows.append([{"text": "📖 Full context", "callback_data": "opt:more"}])
     return rows
 
 
@@ -218,7 +218,7 @@ def build_approval_buttons(permission_suggestions=None, show_more=True):
     row.append({"text": "❌ Deny", "callback_data": "deny"})
     rows = [row]
     if show_more:
-        rows.append([{"text": "📖 More context", "callback_data": "more"}])
+        rows.append([{"text": "📖 Full context", "callback_data": "more"}])
     return rows
 
 

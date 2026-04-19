@@ -377,7 +377,7 @@ def _build_field_buttons(fields, skip_filled=None, show_more=True):
         {"text": "❌ Cancel", "callback_data": "cancel"},
     ])
     if show_more:
-        buttons.append([{"text": "📖 More context", "callback_data": "more"}])
+        buttons.append([{"text": "📖 Full context", "callback_data": "more"}])
     return buttons
 
 

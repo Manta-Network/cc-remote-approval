@@ -1,6 +1,6 @@
 {
   "name": "cc-remote-approval",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Control Claude Code remotely via Telegram \u2014 approve permissions, fill forms, and send new tasks on the go",
   "author": {
     "name": "Manta Network"

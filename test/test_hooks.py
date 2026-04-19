@@ -1249,6 +1249,57 @@ class TestLocalResponseRaceAfterCallback:
         assert result == ("local", None)
 
 
+class TestMoreClickIdempotent:
+    """Duplicate More clicks (user taps fast before the button is edited
+    away) must fire on_more at most once — we don't want to spam the
+    channel with the same context multiple times."""
+
+    def test_poll_callback_debounces_more(self):
+        from permission_request import poll_callback
+
+        ch = FakeChannel()
+        # Simulate: poll returns "more" twice, then "allow"
+        queue = [
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "more"},  # duplicate
+            {"type": "callback", "data": "allow"},
+        ]
+        ch.poll = lambda mid: queue.pop(0) if queue else None
+
+        calls = []
+        def on_more():
+            calls.append(1)
+
+        # No transcript → local response check is a no-op
+        result = poll_callback(ch, 100, transcript_path="", poll_start_size=0,
+                               on_more=on_more)
+        assert result == "allow"
+        assert len(calls) == 1, f"on_more fired {len(calls)} times"
+
+    def test_poll_question_answer_debounces_more(self):
+        from permission_request import poll_question_answer
+
+        ch = FakeChannel()
+        queue = [
+            {"type": "callback", "data": "opt:more"},
+            {"type": "callback", "data": "opt:more"},
+            {"type": "callback", "data": "opt:0"},
+        ]
+        ch.poll = lambda mids: queue.pop(0) if queue else None
+
+        calls = []
+        def on_more(selected, multi):
+            calls.append(1)
+
+        options = [{"label": "Yes", "description": ""}]
+        result = poll_question_answer(
+            ch, 100, options, multi=False,
+            transcript_path="", poll_start_size=0, on_more=on_more,
+        )
+        assert result[0] == "option"
+        assert len(calls) == 1
+
+
 # --- Stop hook ---
 
 class TestStopHookSignalFile:

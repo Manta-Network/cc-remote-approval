@@ -133,9 +133,13 @@ def main():
             data = update["data"]
 
             if data == "stop:more":
+                if not more_available:
+                    # Already handled — ignore duplicate clicks that arrived
+                    # before we finished removing the button.
+                    continue
+                more_available = False
                 _log("User clicked More")
                 send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-                more_available = False
                 ch.edit_buttons(msg_id, _build_buttons(show_more=False))
                 continue
 

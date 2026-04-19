@@ -166,8 +166,10 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
 
             if action == "more":
                 if on_more and more_shown:
-                    on_more(selected, multi)
+                    # Set first so duplicate callbacks arriving during the
+                    # (slow) on_more call are dropped on their next poll.
                     more_shown = False
+                    on_more(selected, multi)
                 continue
 
             if action == "other":
@@ -243,8 +245,10 @@ def poll_callback(ch, message_id, transcript_path="", poll_start_size=0,
     Runs until response, local action, or POLL_TIMEOUT_SECONDS (3 days).
 
     on_more: optional callable invoked when the user taps "More". Called
-    in-loop so polling continues (not a terminal decision like allow/deny)."""
+    at most once — duplicate clicks arriving before the button is edited
+    away are ignored so we don't send the full context twice."""
     deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+    more_shown = True
 
     while time.monotonic() < deadline:
         if check_local_response(transcript_path, poll_start_size, threshold=100):
@@ -256,8 +260,10 @@ def poll_callback(ch, message_id, transcript_path="", poll_start_size=0,
             # with the channel callback.
             if check_local_response(transcript_path, poll_start_size, threshold=100):
                 return "local"
-            if update["data"] == "more" and on_more:
-                on_more()
+            if update["data"] == "more":
+                if on_more and more_shown:
+                    more_shown = False
+                    on_more()
                 continue
             return update["data"]
 

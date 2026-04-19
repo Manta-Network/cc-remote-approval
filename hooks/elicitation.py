@@ -194,10 +194,12 @@ def _child_run(cfg, server_name, message, fields,
             data = update["data"]
 
             if data == "more" and more_shown:
+                # Set first so duplicate clicks arriving during the slow
+                # reply-send are dropped on their next poll.
+                more_shown = False
                 _log("User clicked More")
                 send_full_context(ch, msg_id, transcript_path,
                                   cfg.get("context_turns", 3))
-                more_shown = False
                 ch.edit_message(msg_id, text,
                                 buttons=_build_field_buttons(fields, skip_filled=set(form_data), show_more=False))
                 continue

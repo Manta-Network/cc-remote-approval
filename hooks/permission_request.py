@@ -428,7 +428,7 @@ def main():
         try:
             msg_id, question_text, options, multi = build_ask_user_question_message(
                 ch, tool_input, context_lines, session_tag=session_tag,
-                show_more=bool(transcript_path))
+                show_more=bool(transcript_path) and cfg["context_turns"] > 0)
             state["msg_id"] = msg_id
             _log(f"SENT question msg_id={msg_id} multi={multi}")
         except Exception as e:
@@ -438,13 +438,14 @@ def main():
         def _on_more_question(selected, multi_state):
             _log("User clicked More")
             sent, total = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            fully_sent = total > 0 and sent == total
-            if fully_sent:
+            if sent == total:  # includes 0==0 — nothing to show, drop button
+                if total == 0:
+                    _log("No full context to expand")
                 ch.edit_buttons(msg_id, _build_question_keyboard(
                     options, multi_state, selected, show_more=False))
-            else:
-                _log(f"Full context incomplete ({sent}/{total}); keeping button")
-            return fully_sent
+                return True
+            _log(f"Full context incomplete ({sent}/{total}); keeping button")
+            return False
 
         answer_type, answer_value = poll_question_answer(
             ch, msg_id, options, multi, transcript_path, poll_start_size,
@@ -478,7 +479,7 @@ def main():
             msg_id = send_approval_message(
                 ch, tool_name, tool_display, context_lines,
                 permission_suggestions, session_tag=session_tag,
-                show_more=bool(transcript_path))
+                show_more=bool(transcript_path) and cfg["context_turns"] > 0)
             state["msg_id"] = msg_id
             _log(f"SENT msg_id={msg_id}")
         except Exception as e:
@@ -488,13 +489,14 @@ def main():
         def _on_more():
             _log("User clicked More")
             sent, total = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            fully_sent = total > 0 and sent == total
-            if fully_sent:
+            if sent == total:  # includes 0==0 — nothing to show, drop button
+                if total == 0:
+                    _log("No full context to expand")
                 ch.edit_buttons(msg_id, build_approval_buttons(
                     permission_suggestions, show_more=False))
-            else:
-                _log(f"Full context incomplete ({sent}/{total}); keeping button")
-            return fully_sent
+                return True
+            _log(f"Full context incomplete ({sent}/{total}); keeping button")
+            return False
 
         answer = poll_callback(ch, msg_id, transcript_path, poll_start_size,
                                on_more=_on_more)

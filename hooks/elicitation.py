@@ -154,8 +154,9 @@ def _child_run(cfg, server_name, message, fields,
 
     # Send form immediately
     timeout = cfg.get("elicitation_timeout")
+    show_more = bool(transcript_path) and cfg.get("context_turns", 3) > 0
     text, buttons = _build_form_message(message, fields, timeout=timeout,
-                                        show_more=bool(transcript_path))
+                                        show_more=show_more)
     try:
         msg_id = ch.send_message(text, buttons=buttons)
         _log(f"Sent form msg_id={msg_id}")
@@ -171,7 +172,7 @@ def _child_run(cfg, server_name, message, fields,
     form_data = {f["name"]: f["default"] for f in fields
                  if f["default"] is not None and f["type"] != "boolean"}
 
-    more_shown = bool(transcript_path)
+    more_shown = show_more
 
     while True:
         if os.path.exists(timeout_file):
@@ -195,14 +196,14 @@ def _child_run(cfg, server_name, message, fields,
 
             if data == "more" and more_shown:
                 # Flip first so rapid-duplicate clicks drop; restore on
-                # partial/total failure so the user can still retry.
+                # partial failure so the user can still retry.
                 more_shown = False
                 _log("User clicked More")
                 sent, total = send_full_context(ch, msg_id, transcript_path,
                                                 cfg.get("context_turns", 3))
-                if total > 0 and sent == total:
-                    # Rebuild the form with current filled-state so the user
-                    # sees an accurate reflection of what will be submitted.
+                if sent == total:  # includes 0==0 — nothing to show, drop button
+                    if total == 0:
+                        _log("No full context to expand")
                     _update_form(ch, msg_id, message, fields, form_data,
                                  timeout=timeout, show_more=False)
                 else:

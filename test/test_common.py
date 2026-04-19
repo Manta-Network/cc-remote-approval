@@ -496,6 +496,23 @@ class TestBuildFullContextChunks:
     def test_empty_transcript_returns_empty(self, tmp_path):
         assert build_full_context_chunks("/nonexistent", max_turns=3) == []
 
+    def test_send_full_context_zero_when_nothing_to_send(self, tmp_path):
+        """With max_turns=0 the helper returns (0, 0) — callers must treat
+        this as 'done, nothing to retry', not as a failure that leaves the
+        button in place forever."""
+        from utils.common import send_full_context
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(json.dumps(
+            {"message": {"role": "user", "content": "some content words here"}}
+        ))
+
+        class Ch:
+            def send_reply(self, *a, **kw): return 1
+
+        sent, total = send_full_context(Ch(), 100, str(transcript), max_turns=0)
+        assert sent == 0 and total == 0
+
     def test_split_never_breaks_html_entity(self, tmp_path):
         """When a turn has characters that HTML-escape into entities (like &),
         the split must happen BEFORE escaping so a single '&' never becomes

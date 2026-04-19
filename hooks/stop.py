@@ -85,11 +85,10 @@ def main():
             rows.append([{"text": "📖 Full context", "callback_data": "stop:more"}])
         return rows
 
-    buttons = _build_buttons()
-    more_available = bool(transcript_path)
+    more_available = bool(transcript_path) and cfg["context_turns"] > 0
 
     try:
-        msg_id = ch.send_message(text, buttons=buttons if more_available else _build_buttons(show_more=False))
+        msg_id = ch.send_message(text, buttons=_build_buttons(show_more=more_available))
         _log(f"Sent stop message msg_id={msg_id}")
     except Exception as e:
         _log(f"SEND FAILED: {e}")
@@ -140,10 +139,14 @@ def main():
                 more_available = False
                 _log("User clicked More")
                 sent, total = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-                if total > 0 and sent == total:
+                if sent == total:
+                    # Includes the 0==0 case: nothing to expand, just drop
+                    # the button without a retry loop.
+                    if total == 0:
+                        _log("No full context to expand")
                     ch.edit_buttons(msg_id, _build_buttons(show_more=False))
                 else:
-                    # Partial or total failure — allow the user to retry.
+                    # Partial failure — allow the user to retry.
                     _log(f"Full context incomplete ({sent}/{total}); keeping button")
                     more_available = True
                 continue

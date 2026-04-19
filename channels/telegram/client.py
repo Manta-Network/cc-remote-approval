@@ -131,3 +131,16 @@ class TelegramChannel(Channel):
                 "callback_query_id": callback_id, "text": text})
         except Exception:
             pass
+
+    def send_reply(self, reply_to_msg_id, text, parse_mode="HTML"):
+        """Send a new message anchored as a reply to reply_to_msg_id.
+        Swallows transport errors — caller is typically sending a batch
+        of context messages where one failure shouldn't abort the rest."""
+        try:
+            result = self._send("sendMessage", {
+                "chat_id": self.chat_id, "text": text, "parse_mode": parse_mode,
+                "reply_to_message_id": reply_to_msg_id,
+            })
+            return result["result"]["message_id"]
+        except Exception:
+            return None

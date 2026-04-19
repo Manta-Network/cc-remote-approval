@@ -35,6 +35,8 @@ Claude Code needs permission → Native dialog shows locally (as usual)
 | Agent idle | Notification | 💤 idle notification |
 | Remote task continuation (optional) | Stop | Continue/Dismiss buttons, reply with next instruction; opt-in via `stop_hook_enabled` |
 
+**📖 Full context** button: every interactive hook above also includes a "Full context" button that expands the last N transcript turns (config: `context_turns`) as reply-threaded messages under the original. Useful when the truncated preview isn't enough to decide.
+
 ---
 
 ## Installation

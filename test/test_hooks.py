@@ -721,15 +721,23 @@ class TestElicitationFormBuilding:
             {"name": "ok", "type": "boolean", "title": "OK",
              "required": False, "enum": None, "default": None},
         ]
-        text, buttons = _build_form_message("Please configure", fields)
+        text, buttons = _build_form_message("Please configure", fields, show_more=False)
         assert "Please configure" in text
         # enum buttons + boolean buttons + submit/cancel
         assert len(buttons) >= 3
-        # Last row should be submit/cancel
+        # With show_more=False, last row is submit/cancel
         last_row = buttons[-1]
         labels = [b["text"] for b in last_row]
         assert "✅ Submit" in labels
         assert "❌ Cancel" in labels
+
+    def test_build_form_message_includes_more_button(self):
+        from elicitation import _build_form_message
+        fields = [{"name": "env", "type": "string", "title": "Env",
+                   "enum": ["prod"], "required": True, "default": None}]
+        _, buttons = _build_form_message("X", fields, show_more=True)
+        flat = [b["callback_data"] for row in buttons for b in row]
+        assert "more" in flat
 
     def test_update_form_shows_filled_fields(self):
         from elicitation import _update_form
@@ -1239,6 +1247,82 @@ class TestLocalResponseRaceAfterCallback:
             transcript_path=str(transcript), poll_start_size=baseline,
         )
         assert result == ("local", None)
+
+
+class TestMoreClickIdempotent:
+    """Duplicate More clicks (user taps fast before the button is edited
+    away) must fire on_more at most once — we don't want to spam the
+    channel with the same context multiple times."""
+
+    def test_poll_callback_debounces_more(self):
+        from permission_request import poll_callback
+
+        ch = FakeChannel()
+        # Simulate: poll returns "more" twice, then "allow"
+        queue = [
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "more"},  # duplicate
+            {"type": "callback", "data": "allow"},
+        ]
+        ch.poll = lambda mid: queue.pop(0) if queue else None
+
+        calls = []
+        def on_more():
+            calls.append(1)
+
+        # No transcript → local response check is a no-op
+        result = poll_callback(ch, 100, transcript_path="", poll_start_size=0,
+                               on_more=on_more)
+        assert result == "allow"
+        assert len(calls) == 1, f"on_more fired {len(calls)} times"
+
+    def test_poll_question_answer_debounces_more(self):
+        from permission_request import poll_question_answer
+
+        ch = FakeChannel()
+        queue = [
+            {"type": "callback", "data": "opt:more"},
+            {"type": "callback", "data": "opt:more"},
+            {"type": "callback", "data": "opt:0"},
+        ]
+        ch.poll = lambda mids: queue.pop(0) if queue else None
+
+        calls = []
+        def on_more(selected, multi):
+            calls.append(1)
+
+        options = [{"label": "Yes", "description": ""}]
+        result = poll_question_answer(
+            ch, 100, options, multi=False,
+            transcript_path="", poll_start_size=0, on_more=on_more,
+        )
+        assert result[0] == "option"
+        assert len(calls) == 1
+
+    def test_poll_callback_retries_after_on_more_failure(self):
+        """If on_more returns False (e.g. transport error sending context),
+        the button should remain tappable — a later More click must fire
+        on_more again."""
+        from permission_request import poll_callback
+
+        ch = FakeChannel()
+        queue = [
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "allow"},
+        ]
+        ch.poll = lambda mid: queue.pop(0) if queue else None
+
+        attempts = []
+        def on_more():
+            attempts.append(1)
+            # Fail first attempt, succeed second
+            return len(attempts) >= 2
+
+        result = poll_callback(ch, 100, transcript_path="", poll_start_size=0,
+                               on_more=on_more)
+        assert result == "allow"
+        assert len(attempts) == 2, f"on_more should fire twice, got {len(attempts)}"
 
 
 # --- Stop hook ---

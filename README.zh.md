@@ -35,6 +35,8 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
 | Agent 空闲 | Notification | 💤 idle 通知 |
 | 远程续任务（可选） | Stop | Continue/Dismiss 按钮，回复下一条指令；通过 `stop_hook_enabled` 开启 |
 
+**📖 Full context** 按钮：每个交互式 hook 的消息都带一个 "Full context" 按钮，点击后会把最近 N 轮对话（由 `context_turns` 配置）以完整内容作为 reply 消息发到渠道。适合截断预览不够用时查看完整上下文。
+
 ---
 
 ## 安装

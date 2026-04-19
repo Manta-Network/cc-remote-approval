@@ -40,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 212 automated tests
+├── test/                        # 235 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -83,7 +83,7 @@ create_channel(cfg) reads cfg["channel_type"] and returns the right implementati
 | `hooks/stop.py` | Intercept before idle → send TG with Continue/Dismiss buttons → poll for new instruction → block stop with `reason` (injects as continuation directive) or allow idle. Signal file dedup with Notification hook. |
 | `hooks/notification.py` | Fire-and-forget: send notification when agent is idle. Skips if Stop hook recently handled. |
 | `hooks/session_start.py` | Fires on new session — injects a system-context hint steering Claude to prefer the `AskUserQuestion` tool over free-text option lists (structured tool = reliable button UI on the channel, no heuristic parsing needed). Only fires when a channel is configured. |
-| `utils/common.py` | Config loading, secret masking, HTML escaping, logging, local response detection, session_tag helper, transcript context extraction (strips Claude Code's `<system-reminder>` / `<command-name>` / `<local-command-caveat>` wrappers so only real user intent appears in channel previews) |
+| `utils/common.py` | Config loading, secret masking, HTML escaping, logging, local response detection, session_tag helper, transcript context extraction (truncated previews + full untruncated chunks for the "📖 Full context" button; strips Claude Code's system-reminder / command-* wrappers) |
 | `utils/channel.py` | Channel interface + factory. Hooks call `ch.send_message()`, `ch.poll()`, `ch.edit_message()` |
 | `channels/telegram/client.py` | TelegramChannel: Bot API via urllib, token in-process |
 | `channels/telegram/poll.py` | Coordinated getUpdates: flock + pending.json queue (5-min TTL) for concurrent hooks |
@@ -112,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 212 tests, ~0.1s
+pytest test/ -v    # 235 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -150,7 +150,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 
 | # | Scenario | Hook Type | Status | Notes |
 |---|---|---|---|---|
-| 1 | **Bash execution** | PermissionRequest | ✅ | Allow / Always / Deny buttons with context |
+| 1 | **Bash execution** | PermissionRequest | ✅ | Allow / Always / Deny + 📖 Full context button |
 | 2 | **File write (Write)** | PermissionRequest | ✅ | Same handler |
 | 3 | **File edit (Edit)** | PermissionRequest | ✅ | Shows file path |
 | 4 | **WebFetch** | PermissionRequest | ✅ | Shows URL |
@@ -174,7 +174,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | Scope | Coverage |
 |---|---|
 | Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **212 tests in ~0.1s** |
+| Automated tests | **235 tests in ~0.1s** |
 | All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards

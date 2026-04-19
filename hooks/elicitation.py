@@ -16,7 +16,8 @@ import sys
 import time
 
 from utils.common import (load_config, html_escape, make_logger,
-                     sanitize_name, smart_truncate, ELICIT_SIGNAL_DIR)
+                     sanitize_name, smart_truncate, ELICIT_SIGNAL_DIR,
+                     send_full_context)
 from utils.channel import create_channel
 _log = make_logger("elicitation")
 
@@ -127,7 +128,8 @@ def main():
         _log(f"CHILD started, sending Telegram form")
         try:
             _child_run(cfg, server_name, message, fields,
-                        response_file, timeout_file, done_file)
+                        response_file, timeout_file, done_file,
+                        transcript_path=event.get("transcript_path", ""))
         finally:
             # Clean up signal files (NOT response_file — parent needs to read it)
             for f in [active_file, timeout_file, done_file]:
@@ -141,7 +143,8 @@ def main():
 # ---------------------------------------------------------------- child logic
 
 def _child_run(cfg, server_name, message, fields,
-               response_file, timeout_file, done_file):
+               response_file, timeout_file, done_file,
+               transcript_path=""):
     """Child process: send form via channel, poll for response."""
     ch, ch_err = create_channel(cfg)
     if not ch:
@@ -151,7 +154,9 @@ def _child_run(cfg, server_name, message, fields,
 
     # Send form immediately
     timeout = cfg.get("elicitation_timeout")
-    text, buttons = _build_form_message(message, fields, timeout=timeout)
+    show_more = bool(transcript_path) and cfg.get("context_turns", 3) > 0
+    text, buttons = _build_form_message(message, fields, timeout=timeout,
+                                        show_more=show_more)
     try:
         msg_id = ch.send_message(text, buttons=buttons)
         _log(f"Sent form msg_id={msg_id}")
@@ -166,6 +171,8 @@ def _child_run(cfg, server_name, message, fields,
     # the user explicitly clicks; defaults are applied at submit time.
     form_data = {f["name"]: f["default"] for f in fields
                  if f["default"] is not None and f["type"] != "boolean"}
+
+    more_shown = show_more
 
     while True:
         if os.path.exists(timeout_file):
@@ -187,6 +194,23 @@ def _child_run(cfg, server_name, message, fields,
         if update["type"] == "callback":
             data = update["data"]
 
+            if data == "more" and more_shown:
+                # Flip first so rapid-duplicate clicks drop; restore on
+                # partial failure so the user can still retry.
+                more_shown = False
+                _log("User clicked More")
+                sent, total = send_full_context(ch, msg_id, transcript_path,
+                                                cfg.get("context_turns", 3))
+                if sent == total:  # includes 0==0 — nothing to show, drop button
+                    if total == 0:
+                        _log("No full context to expand")
+                    _update_form(ch, msg_id, message, fields, form_data,
+                                 timeout=timeout, show_more=False)
+                else:
+                    _log(f"Full context incomplete ({sent}/{total}); keeping button")
+                    more_shown = True
+                continue
+
             if data.startswith("f:"):
                 # Format: f:{field_idx}:{type}:{value_idx_or_flag}
                 parts = data.split(":")
@@ -200,7 +224,7 @@ def _child_run(cfg, server_name, message, fields,
                                 form_data[field["name"]] = field["enum"][ei]
                         elif ftype == "b":
                             form_data[field["name"]] = val == "1"
-                        _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
+                        _update_form(ch, msg_id, message, fields, form_data, timeout=timeout, show_more=more_shown)
 
             elif data == "submit":
                 # Block submit if any required field is still empty.
@@ -208,7 +232,7 @@ def _child_run(cfg, server_name, message, fields,
                            if f.get("required") and f["name"] not in form_data]
                 if missing:
                     _log(f"Submit blocked — missing required: {missing}")
-                    _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
+                    _update_form(ch, msg_id, message, fields, form_data, timeout=timeout, show_more=more_shown)
                     continue
                 # Apply boolean defaults for fields the user didn't touch
                 for f in fields:
@@ -248,7 +272,7 @@ def _child_run(cfg, server_name, message, fields,
                         continue  # bad input, try next field or wait
                 else:
                     continue
-                _update_form(ch, msg_id, message, fields, form_data, timeout=timeout)
+                _update_form(ch, msg_id, message, fields, form_data, timeout=timeout, show_more=more_shown)
                 break
 
 
@@ -334,7 +358,7 @@ def _parse_fields(schema):
     return fields
 
 
-def _build_field_buttons(fields, skip_filled=None):
+def _build_field_buttons(fields, skip_filled=None, show_more=True):
     """Build inline-keyboard rows for form fields. Shared by _build_form_message
     and _update_form — enum fields get one button per value, booleans get a
     ✅/⬜ pair, and string fields have no buttons (handled via text reply).
@@ -359,10 +383,12 @@ def _build_field_buttons(fields, skip_filled=None):
         {"text": "✅ Submit", "callback_data": "submit"},
         {"text": "❌ Cancel", "callback_data": "cancel"},
     ])
+    if show_more:
+        buttons.append([{"text": "📖 Full context", "callback_data": "more"}])
     return buttons
 
 
-def _build_form_message(message, fields, timeout=None):
+def _build_form_message(message, fields, timeout=None, show_more=True):
     # Truncate cleanly at a paragraph/line/word boundary before HTML-escaping
     # so the final message stays under TG's 4096-char limit even when the
     # MCP server sends a very long elicitation prompt.
@@ -377,10 +403,10 @@ def _build_form_message(message, fields, timeout=None):
         if f["type"] in _TEXT_INPUT_TYPES and not f.get("enum"):
             hint = "number" if f["type"] in ("integer", "number") else "text"
             text += f"\n💬 <i>{html_escape(f['title'])}: type {hint} below</i>"
-    return text, _build_field_buttons(fields)
+    return text, _build_field_buttons(fields, show_more=show_more)
 
 
-def _update_form(ch, msg_id, message, fields, form_data, timeout=None):
+def _update_form(ch, msg_id, message, fields, form_data, timeout=None, show_more=True):
     message = smart_truncate(message or "", 2000, marker="\n\n…truncated")
     text = f"📋 <b>Form</b>\n"
     if timeout:
@@ -393,7 +419,7 @@ def _update_form(ch, msg_id, message, fields, form_data, timeout=None):
         else:
             text += f"\n⬜ {html_escape(title)}: ..."
     ch.edit_message(msg_id, text,
-                    buttons=_build_field_buttons(fields, skip_filled=set(form_data)))
+                    buttons=_build_field_buttons(fields, skip_filled=set(form_data), show_more=show_more))
 
 
 if __name__ == "__main__":

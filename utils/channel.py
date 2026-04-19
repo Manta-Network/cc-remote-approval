@@ -88,6 +88,18 @@ class Channel:
         """Acknowledge a button click (platform-specific, optional)."""
         pass
 
+    def send_reply(self, reply_to_msg_id, text, parse_mode="HTML"):
+        """Send a new message as a reply to an existing one.
+
+        Used for expanding context — More button clicks send the last N
+        untruncated transcript turns as separate reply messages so the
+        user can scroll through them without blowing up the original
+        message.
+
+        Default implementation: degrade to plain send_message.
+        """
+        return self.send_message(text, parse_mode=parse_mode)
+
 
 class ChannelError:
     """Structured error when channel creation fails."""

@@ -106,18 +106,35 @@ def session_tag(event):
 
 # Patterns that look like secrets — matched case-insensitively
 _SECRET_PATTERNS = [
-    # Key=value patterns: TOKEN=xxx, password=xxx, secret=xxx, etc.
-    re.compile(r'(?i)(token|password|passwd|secret|api_key|apikey|access_key|private_key|auth)\s*[=:]\s*\S+'),
+    # Key=value patterns (English + Chinese keywords)
+    re.compile(r'(?i)(token|password|passwd|secret|api_key|apikey|access_key|private_key|auth|credential|mnemonic|seed_phrase|recovery_phrase)\s*[=:]\s*\S+'),
+    re.compile(r'(密码|密钥|口令|凭据|助记词|私钥)\s*[=:：]\s*\S+'),
     # Authorization headers (captures "Authorization: Bearer <token>" as one match)
     re.compile(r'(?i)Authorization\s*[:=]\s*(Bearer|Basic)?\s*\S+'),
     re.compile(r'(?i)Bearer\s+\S+'),
     # AWS keys
     re.compile(r'AKIA[0-9A-Z]{16}'),
     re.compile(r'(?i)aws_secret_access_key\s*[=:]\s*\S+'),
+    # GitHub personal access tokens + app tokens
+    re.compile(r'\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b'),
+    re.compile(r'\bgithub_pat_[A-Za-z0-9_]{60,}\b'),
+    # Slack tokens
+    re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{10,}\b'),
+    # Stripe, Twilio, SendGrid prefixes
+    re.compile(r'\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]{20,}\b'),
+    re.compile(r'\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b'),
+    # JWT (three dot-separated base64url segments)
+    re.compile(r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{10,}\b'),
+    # PEM blocks (private key / cert bodies)
+    re.compile(r'-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----'),
+    # SSH private key header (in case END block is missing)
+    re.compile(r'ssh-(rsa|ed25519|dss|ecdsa)\s+[A-Za-z0-9+/=]{50,}'),
     # Cookie values
     re.compile(r'(?i)(cookie|set-cookie)\s*[=:]\s*\S+'),
     # Long query strings (often contain tokens)
     re.compile(r'\?[^"\s]{80,}'),
+    # URL path segments that look like token paths
+    re.compile(r'(?i)/(token|key|secret|session)/[A-Za-z0-9_-]{20,}'),
     # Hex/base64 strings that look like keys (32+ chars)
     re.compile(r'(?<=[=: ])[A-Za-z0-9+/]{40,}={0,2}(?=\s|$)'),
 ]

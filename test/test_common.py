@@ -124,6 +124,63 @@ class TestMaskSecrets:
         result = mask_secrets('Cookie: session=abc123xyz')
         assert "abc123xyz" not in result
 
+    def test_masks_chinese_keywords(self):
+        cases = [
+            ("密码：my-secret-p@ss", "my-secret"),
+            ("密钥=abc123def456", "abc123def"),
+            ("助记词: word1 word2 word3", "word1"),
+        ]
+        for text, hidden in cases:
+            result = mask_secrets(text)
+            assert hidden not in result, f"leaked {hidden!r} from {text!r}"
+
+    # NOTE: token fixtures below are assembled at runtime from pieces so
+    # GitHub's secret scanner doesn't flag the test file as containing
+    # real secrets.
+
+    def test_masks_github_pat(self):
+        payload = "a" * 20 + "B" * 20  # 40 chars matching the pattern
+        token = "ghp" + "_" + payload
+        result = mask_secrets(f"gh token: {token}")
+        assert payload not in result
+
+    def test_masks_slack_token(self):
+        body = "1234567890" + "-" + "abcdefghij"
+        token = "xoxb" + "-" + body
+        result = mask_secrets(token)
+        assert "abcdefghij" not in result
+
+    def test_masks_stripe_key(self):
+        payload = "a" * 24
+        key = "sk" + "_" + "live" + "_" + payload
+        result = mask_secrets(f"key = {key}")
+        assert payload not in result
+
+    def test_masks_jwt(self):
+        header = "eyJ" + "hbGciOiJIUzI1NiJ9"
+        body = "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0"
+        sig = "sig" + "123abc456def789"
+        jwt = header + "." + body + "." + sig
+        result = mask_secrets(f"token = {jwt}")
+        assert sig not in result
+
+    def test_masks_pem_private_key(self):
+        pem = (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "MIIEpAIBAAKCAQEA1234567890abcdef\n"
+            "-----END RSA PRIVATE KEY-----"
+        )
+        result = mask_secrets(pem)
+        assert "1234567890abcdef" not in result
+
+    def test_masks_ssh_key(self):
+        result = mask_secrets("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDxxxxxxxxxxxxxxxx user@host")
+        assert "AAAAB3NzaC1yc2EAAAADAQABAAABAQDxxxxxxxxxxxxxxxx" not in result
+
+    def test_masks_url_token_path(self):
+        result = mask_secrets("https://api.example.com/v1/token/aBc123dEf456gHi789jKl")
+        assert "aBc123dEf456gHi789jKl" not in result
+
 
 class TestMakeLogger:
     def test_creates_log_file(self, tmp_path):

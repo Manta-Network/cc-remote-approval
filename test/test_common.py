@@ -352,16 +352,18 @@ class TestExtractLastMessages:
         """send_full_context returns (sent, total). A partial send — some
         chunks succeed, some fail — must NOT be mistaken for full success
         by the caller, otherwise the user gets a truncated context with
-        no retry path."""
+        no retry path. Use a single oversized turn so it splits into
+        multiple chunks (the packing logic would otherwise merge small
+        turns into one)."""
         import json as _json
         from utils.common import send_full_context
 
         transcript = tmp_path / "t.jsonl"
-        lines = [
-            _json.dumps({"message": {"role": "user", "content": f"turn {i} content words"}})
-            for i in range(3)
-        ]
-        transcript.write_text("\n".join(lines))
+        # One very big turn → splits across multiple chunks
+        big = "word " * 15000
+        transcript.write_text(_json.dumps({
+            "message": {"role": "user", "content": big}
+        }))
 
         class PartialChannel:
             def __init__(self):
@@ -372,8 +374,8 @@ class TestExtractLastMessages:
                 return 42 if self.calls == 1 else None
 
         ch = PartialChannel()
-        sent, total = send_full_context(ch, 100, str(transcript), max_turns=3)
-        assert total == 3
+        sent, total = send_full_context(ch, 100, str(transcript), max_turns=1)
+        assert total > 1, "test needs a multi-chunk context to exercise partial failure"
         assert sent == 1
         assert sent < total, "partial failure should not read as full success"
 
@@ -438,7 +440,9 @@ class TestBuildFullContextChunks:
     """build_full_context_chunks returns full (untruncated) turns, splitting
     oversized ones across multiple chunks with a (part i/N) marker."""
 
-    def test_returns_chunk_per_turn(self, tmp_path):
+    def test_small_turns_packed_into_one_chunk(self, tmp_path):
+        """Three short turns should pack into a single TG message — we
+        want to minimize message count when the content fits together."""
         transcript = tmp_path / "t.jsonl"
         lines = [
             json.dumps({"message": {"role": "user", "content": "first turn"}}),
@@ -447,10 +451,30 @@ class TestBuildFullContextChunks:
         ]
         transcript.write_text("\n".join(lines))
         chunks = build_full_context_chunks(str(transcript), max_turns=3)
-        assert len(chunks) == 3
+        assert len(chunks) == 1
         assert "first turn" in chunks[0]
-        assert "second turn" in chunks[1]
-        assert "third turn" in chunks[2]
+        assert "second turn" in chunks[0]
+        assert "third turn" in chunks[0]
+
+    def test_oversized_turn_splits_but_others_pack(self, tmp_path):
+        """A short turn next to an oversized one: short packs alone,
+        oversized splits into its own parts. Final layout: short-chunk,
+        then multi-part chunks for the big one."""
+        transcript = tmp_path / "t.jsonl"
+        big = "word " * 15000  # ~75KB
+        lines = [
+            json.dumps({"message": {"role": "user", "content": "hello"}}),
+            json.dumps({"message": {"role": "assistant", "content": big}}),
+            json.dumps({"message": {"role": "user", "content": "bye"}}),
+        ]
+        transcript.write_text("\n".join(lines))
+        chunks = build_full_context_chunks(str(transcript), max_turns=3)
+        # First chunk holds "hello" (packing stops before the oversized turn)
+        assert "hello" in chunks[0]
+        # Middle chunks carry the oversized turn's parts
+        assert any("part 1/" in c for c in chunks)
+        # Final chunk holds "bye" (separate from the oversized turn's parts)
+        assert "bye" in chunks[-1]
 
     def test_splits_oversized_turn(self, tmp_path):
         transcript = tmp_path / "t.jsonl"

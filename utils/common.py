@@ -332,13 +332,15 @@ def _split_escaped_at_boundaries(raw_text, limit):
 
 def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
     """Return the last N user/assistant turns as HTML-safe message chunks
-    (oldest → newest). Each chunk fits under Telegram's 4096-char limit with
-    headroom. A single very long turn is split across multiple chunks at
-    paragraph/line/word boundaries (never mid-entity) with a "(part i/N)"
-    marker so readers know to keep scrolling."""
+    (oldest → newest). Each chunk fits under Telegram's 4096-char limit
+    with headroom.
+
+    Packing strategy: complete turns are greedy-packed into a single chunk
+    when they fit together; only turns larger than `chunk_limit` stand
+    alone and split across multiple chunks with "(part i/N)" markers."""
     messages = extract_last_messages(
         transcript_path, max_messages=max_turns, max_chars=None, full_scan=True)
-    chunks = []
+    blocks = []  # (rendered_text, is_atomic) — atomic blocks can be packed together
     for idx, msg in enumerate(messages, start=1):
         prefix = "👤" if msg["role"] == "user" else "🤖"
         ts = msg.get("timestamp", "")
@@ -353,16 +355,35 @@ def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
                 pass
         header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n"
         raw_body = mask_secrets(msg["text"])
-        # Size the body limit against the *escaped* length so pathological
-        # content (many &, <, >) never pushes a chunk past TG's cap.
         body_limit = chunk_limit - len(header) - 40
         escaped_parts = _split_escaped_at_boundaries(raw_body, body_limit)
         if len(escaped_parts) == 1:
-            chunks.append(header + escaped_parts[0])
+            blocks.append((header + escaped_parts[0], True))
         else:
             total = len(escaped_parts)
             for i, part in enumerate(escaped_parts, start=1):
-                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{part}")
+                blocks.append((f"{header}<i>(part {i}/{total})</i>\n{part}", False))
+
+    # Pack atomic blocks greedily; oversized (non-atomic) blocks stand alone.
+    chunks = []
+    current = ""
+    sep = "\n\n"
+    for text, atomic in blocks:
+        if not atomic:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(text)
+            continue
+        if not current:
+            current = text
+        elif len(current) + len(sep) + len(text) <= chunk_limit:
+            current += sep + text
+        else:
+            chunks.append(current)
+            current = text
+    if current:
+        chunks.append(current)
     return chunks
 
 

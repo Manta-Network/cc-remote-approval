@@ -243,6 +243,14 @@ def format_context_block(context_lines):
     return f"\n\n📋 <b>Context:</b>\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n{body}"
 
 
+def send_full_context(ch, reply_to_msg_id, transcript_path, max_turns):
+    """Send the last N transcript turns as reply-anchored messages.
+    Each turn becomes one (or more) TG messages threaded under the
+    original. Used by every hook's "Full context" button."""
+    for chunk in build_full_context_chunks(transcript_path, max_turns=max_turns):
+        ch.send_reply(reply_to_msg_id, chunk)
+
+
 def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
     """Return the last N user/assistant turns as HTML-safe message chunks
     (oldest → newest). Each chunk fits under Telegram's 4096-char limit with

@@ -25,7 +25,7 @@ import time
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
                           check_local_response, STOP_SIGNAL_DIR,
-                          build_full_context_chunks,
+                          send_full_context,
                           session_tag as common_session_tag)
 from utils.channel import create_channel
 
@@ -134,10 +134,7 @@ def main():
 
             if data == "stop:more":
                 _log("User clicked More")
-                chunks = build_full_context_chunks(
-                    transcript_path, max_turns=cfg["context_turns"])
-                for chunk in chunks:
-                    ch.send_reply(msg_id, chunk)
+                send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
                 more_available = False
                 ch.edit_buttons(msg_id, _build_buttons(show_more=False))
                 continue

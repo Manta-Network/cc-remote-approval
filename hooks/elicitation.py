@@ -17,7 +17,7 @@ import time
 
 from utils.common import (load_config, html_escape, make_logger,
                      sanitize_name, smart_truncate, ELICIT_SIGNAL_DIR,
-                     build_full_context_chunks)
+                     send_full_context)
 from utils.channel import create_channel
 _log = make_logger("elicitation")
 
@@ -195,10 +195,8 @@ def _child_run(cfg, server_name, message, fields,
 
             if data == "more" and more_shown:
                 _log("User clicked More")
-                chunks = build_full_context_chunks(
-                    transcript_path, max_turns=cfg.get("context_turns", 3))
-                for chunk in chunks:
-                    ch.send_reply(msg_id, chunk)
+                send_full_context(ch, msg_id, transcript_path,
+                                  cfg.get("context_turns", 3))
                 more_shown = False
                 ch.edit_message(msg_id, text,
                                 buttons=_build_field_buttons(fields, skip_filled=set(form_data), show_more=False))

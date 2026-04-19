@@ -12,7 +12,7 @@ import time
 from utils.common import (load_config, html_escape, make_logger,
                      mask_secrets, check_local_response, format_context_lines,
                      format_context_block, smart_truncate, POLL_TIMEOUT_SECONDS,
-                     build_full_context_chunks,
+                     send_full_context,
                      session_tag as common_session_tag)
 from utils.channel import create_channel
 
@@ -427,10 +427,7 @@ def main():
 
         def _on_more_question(selected, multi_state):
             _log("User clicked More")
-            chunks = build_full_context_chunks(
-                transcript_path, max_turns=cfg["context_turns"])
-            for chunk in chunks:
-                ch.send_reply(msg_id, chunk)
+            send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
             ch.edit_buttons(msg_id, _build_question_keyboard(
                 options, multi_state, selected, show_more=False))
 
@@ -475,10 +472,7 @@ def main():
 
         def _on_more():
             _log("User clicked More")
-            chunks = build_full_context_chunks(
-                transcript_path, max_turns=cfg["context_turns"])
-            for chunk in chunks:
-                ch.send_reply(msg_id, chunk)
+            send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
             ch.edit_buttons(msg_id, build_approval_buttons(
                 permission_suggestions, show_more=False))
 

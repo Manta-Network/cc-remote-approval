@@ -449,6 +449,33 @@ class TestBuildFullContextChunks:
             # Must still be valid bounded chunks
             assert len(chunk) <= 4096
 
+    def test_html_escape_expansion_stays_under_limit(self, tmp_path):
+        """Raw text heavy in &/</> inflates 4-5x when HTML-escaped. Chunk
+        sizing must account for that — a pathological all-ampersand turn
+        should never emit a chunk past TG's 4096-char limit."""
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": "&" * 3900}
+        }))
+        chunks = build_full_context_chunks(str(transcript), max_turns=1)
+        assert len(chunks) > 0
+        for chunk in chunks:
+            assert len(chunk) <= 4096
+
+    def test_single_huge_turn_not_dropped(self, tmp_path):
+        """Full-context extraction reads the whole file so a final turn
+        larger than the 50KB tail window isn't dropped mid-JSON."""
+        transcript = tmp_path / "t.jsonl"
+        big = "word " * 15000  # ~75KB, well past the 50KB tail
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": big}
+        }))
+        chunks = build_full_context_chunks(str(transcript), max_turns=1)
+        assert len(chunks) > 0
+        # Content survives across the chunks
+        combined = "".join(chunks)
+        assert combined.count("word") >= 15000
+
     def test_split_prefers_line_boundaries(self, tmp_path):
         """Long multi-line body should split at newline, not mid-line."""
         transcript = tmp_path / "t.jsonl"

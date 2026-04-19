@@ -200,8 +200,10 @@ def _child_run(cfg, server_name, message, fields,
                 _log("User clicked More")
                 send_full_context(ch, msg_id, transcript_path,
                                   cfg.get("context_turns", 3))
-                ch.edit_message(msg_id, text,
-                                buttons=_build_field_buttons(fields, skip_filled=set(form_data), show_more=False))
+                # Rebuild the form with current filled-state so the user
+                # sees an accurate reflection of what will be submitted.
+                _update_form(ch, msg_id, message, fields, form_data,
+                             timeout=timeout, show_more=False)
                 continue
 
             if data.startswith("f:"):

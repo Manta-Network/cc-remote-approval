@@ -170,17 +170,27 @@ def _strip_system_tags(text):
     return _XML_TAG.sub("", text)
 
 
-def extract_last_messages(transcript_path, max_messages=3, max_chars=200):
+def extract_last_messages(transcript_path, max_messages=3, max_chars=200,
+                          full_scan=False):
     """Read last N user/assistant messages from a transcript JSONL file.
-    Returns list of raw text strings (no HTML, no masking — caller handles that)."""
+    Returns list of raw text strings (no HTML, no masking — caller handles that).
+
+    full_scan=True reads the entire file instead of just the 50KB tail.
+    Use when you need complete messages (e.g. the Full context feature) —
+    a single huge turn larger than the tail window would otherwise be
+    dropped because the seek lands mid-entry and the partial JSON line
+    fails to parse."""
     if not transcript_path or not os.path.exists(transcript_path):
         return []
     try:
         with open(transcript_path, "rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            f.seek(max(0, size - 50000))
-            chunk = f.read().decode("utf-8", errors="replace")
+            if full_scan:
+                chunk = f.read().decode("utf-8", errors="replace")
+            else:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 50000))
+                chunk = f.read().decode("utf-8", errors="replace")
 
         messages = []
         for line in chunk.strip().split("\n"):
@@ -268,26 +278,42 @@ def send_full_context(ch, reply_to_msg_id, transcript_path, max_turns):
         ch.send_reply(reply_to_msg_id, chunk)
 
 
-def _split_text_at_boundaries(text, limit):
-    """Split raw text into pieces of ≤ limit chars each, preferring to cut
-    at paragraph / newline / space boundaries so we don't slice through
-    words or lines when a turn exceeds the limit."""
+def _split_escaped_at_boundaries(raw_text, limit):
+    """Split raw text into pieces whose HTML-escaped size is ≤ limit.
+    Prefers to cut at paragraph / newline / space boundaries so we don't
+    slice words in half. Returns a list of already-escaped strings."""
     parts = []
-    remaining = text
+    remaining = raw_text
     while remaining:
-        if len(remaining) <= limit:
-            parts.append(remaining)
+        escaped = html_escape(remaining)
+        if len(escaped) <= limit:
+            parts.append(escaped)
             break
-        window = remaining[:limit]
+        # Estimate how many raw chars fit: if the full remainder inflated
+        # to N chars but we can only afford `limit`, keep roughly
+        # limit / expansion_ratio raw chars. Factor 0.9 as safety margin.
+        ratio = max(1.0, len(escaped) / max(1, len(remaining)))
+        target_raw = max(100, int(limit * 0.9 / ratio))
+        target_raw = min(target_raw, len(remaining))
+        window = remaining[:target_raw]
         cut = -1
         for sep in ("\n\n", "\n", " "):
             idx = window.rfind(sep)
-            if idx > limit // 2:  # avoid tiny leading pieces
+            if idx > target_raw // 2:
                 cut = idx + len(sep)
                 break
         if cut == -1:
-            cut = limit  # no nice boundary — hard cut
-        parts.append(remaining[:cut].rstrip())
+            cut = target_raw
+        piece = remaining[:cut].rstrip()
+        piece_escaped = html_escape(piece)
+        if len(piece_escaped) > limit:
+            # Worst-case pathological content (e.g. pure ampersands) —
+            # shrink until it fits.
+            while len(piece_escaped) > limit and len(piece) > 1:
+                piece = piece[: len(piece) * limit // max(1, len(piece_escaped))]
+                piece_escaped = html_escape(piece)
+            cut = len(piece)
+        parts.append(piece_escaped)
         remaining = remaining[cut:]
     return parts
 
@@ -298,7 +324,8 @@ def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
     headroom. A single very long turn is split across multiple chunks at
     paragraph/line/word boundaries (never mid-entity) with a "(part i/N)"
     marker so readers know to keep scrolling."""
-    messages = extract_last_messages(transcript_path, max_messages=max_turns, max_chars=None)
+    messages = extract_last_messages(
+        transcript_path, max_messages=max_turns, max_chars=None, full_scan=True)
     chunks = []
     for idx, msg in enumerate(messages, start=1):
         prefix = "👤" if msg["role"] == "user" else "🤖"
@@ -314,16 +341,16 @@ def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
                 pass
         header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n"
         raw_body = mask_secrets(msg["text"])
-        # Split on RAW text, then escape each piece — ensures we never cut
-        # an HTML entity in half.
+        # Size the body limit against the *escaped* length so pathological
+        # content (many &, <, >) never pushes a chunk past TG's cap.
         body_limit = chunk_limit - len(header) - 40
-        raw_parts = _split_text_at_boundaries(raw_body, body_limit)
-        if len(raw_parts) == 1:
-            chunks.append(header + html_escape(raw_parts[0]))
+        escaped_parts = _split_escaped_at_boundaries(raw_body, body_limit)
+        if len(escaped_parts) == 1:
+            chunks.append(header + escaped_parts[0])
         else:
-            total = len(raw_parts)
-            for i, part in enumerate(raw_parts, start=1):
-                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{html_escape(part)}")
+            total = len(escaped_parts)
+            for i, part in enumerate(escaped_parts, start=1):
+                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{part}")
     return chunks
 
 

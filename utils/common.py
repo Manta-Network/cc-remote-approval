@@ -182,6 +182,9 @@ def extract_last_messages(transcript_path, max_messages=3, max_chars=200,
     fails to parse."""
     if not transcript_path or not os.path.exists(transcript_path):
         return []
+    if max_messages <= 0:
+        # Python's messages[-0:] == messages[0:] (full list), so short-circuit.
+        return []
     try:
         with open(transcript_path, "rb") as f:
             if full_scan:
@@ -273,9 +276,16 @@ def format_context_block(context_lines):
 def send_full_context(ch, reply_to_msg_id, transcript_path, max_turns):
     """Send the last N transcript turns as reply-anchored messages.
     Each turn becomes one (or more) TG messages threaded under the
-    original. Used by every hook's "Full context" button."""
+    original. Used by every hook's "Full context" button.
+
+    Returns the number of chunks successfully sent. Callers should only
+    remove the Full context button when this is > 0 — otherwise a
+    transient transport failure would silently hide the feature."""
+    sent = 0
     for chunk in build_full_context_chunks(transcript_path, max_turns=max_turns):
-        ch.send_reply(reply_to_msg_id, chunk)
+        if ch.send_reply(reply_to_msg_id, chunk):
+            sent += 1
+    return sent
 
 
 def _split_escaped_at_boundaries(raw_text, limit):

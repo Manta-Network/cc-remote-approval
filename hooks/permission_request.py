@@ -166,10 +166,11 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
 
             if action == "more":
                 if on_more and more_shown:
-                    # Set first so duplicate callbacks arriving during the
-                    # (slow) on_more call are dropped on their next poll.
+                    # Flip first so rapid-duplicate callbacks drop, then
+                    # restore on failure so the user can retry.
                     more_shown = False
-                    on_more(selected, multi)
+                    if on_more(selected, multi) is False:
+                        more_shown = True
                 continue
 
             if action == "other":
@@ -262,8 +263,11 @@ def poll_callback(ch, message_id, transcript_path="", poll_start_size=0,
                 return "local"
             if update["data"] == "more":
                 if on_more and more_shown:
+                    # Flip first so rapid-duplicate callbacks drop, then
+                    # restore on failure so the user can retry.
                     more_shown = False
-                    on_more()
+                    if on_more() is False:
+                        more_shown = True
                 continue
             return update["data"]
 
@@ -433,9 +437,13 @@ def main():
 
         def _on_more_question(selected, multi_state):
             _log("User clicked More")
-            send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            ch.edit_buttons(msg_id, _build_question_keyboard(
-                options, multi_state, selected, show_more=False))
+            sent = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
+            if sent > 0:
+                ch.edit_buttons(msg_id, _build_question_keyboard(
+                    options, multi_state, selected, show_more=False))
+            else:
+                _log("Full context send failed; keeping button for retry")
+            return sent > 0
 
         answer_type, answer_value = poll_question_answer(
             ch, msg_id, options, multi, transcript_path, poll_start_size,
@@ -478,9 +486,13 @@ def main():
 
         def _on_more():
             _log("User clicked More")
-            send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            ch.edit_buttons(msg_id, build_approval_buttons(
-                permission_suggestions, show_more=False))
+            sent = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
+            if sent > 0:
+                ch.edit_buttons(msg_id, build_approval_buttons(
+                    permission_suggestions, show_more=False))
+            else:
+                _log("Full context send failed; keeping button for retry")
+            return sent > 0
 
         answer = poll_callback(ch, msg_id, transcript_path, poll_start_size,
                                on_more=_on_more)

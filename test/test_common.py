@@ -348,6 +348,19 @@ class TestExtractLastMessages:
     def test_returns_empty_for_empty_path(self):
         assert extract_last_messages("") == []
 
+    def test_max_messages_zero_returns_empty(self, tmp_path):
+        """Python's messages[-0:] == messages[:] (full list). max_messages=0
+        must short-circuit to [] so context_turns=0 doesn't blow up into
+        sending every transcript turn."""
+        transcript = tmp_path / "t.jsonl"
+        lines = [
+            json.dumps({"message": {"role": "user", "content": f"msg {i} has words"}})
+            for i in range(5)
+        ]
+        transcript.write_text("\n".join(lines))
+        assert extract_last_messages(str(transcript), max_messages=0) == []
+        assert extract_last_messages(str(transcript), max_messages=-1) == []
+
     def test_strips_tags_preserving_inner_content(self, tmp_path):
         """Tags are removed but inner text is preserved — filter leaves
         user intent intact while dropping the XML plumbing."""

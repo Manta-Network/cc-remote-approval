@@ -194,16 +194,20 @@ def _child_run(cfg, server_name, message, fields,
             data = update["data"]
 
             if data == "more" and more_shown:
-                # Set first so duplicate clicks arriving during the slow
-                # reply-send are dropped on their next poll.
+                # Flip first so rapid-duplicate clicks drop; restore on
+                # failure so the user can still retry.
                 more_shown = False
                 _log("User clicked More")
-                send_full_context(ch, msg_id, transcript_path,
-                                  cfg.get("context_turns", 3))
-                # Rebuild the form with current filled-state so the user
-                # sees an accurate reflection of what will be submitted.
-                _update_form(ch, msg_id, message, fields, form_data,
-                             timeout=timeout, show_more=False)
+                sent = send_full_context(ch, msg_id, transcript_path,
+                                         cfg.get("context_turns", 3))
+                if sent > 0:
+                    # Rebuild the form with current filled-state so the user
+                    # sees an accurate reflection of what will be submitted.
+                    _update_form(ch, msg_id, message, fields, form_data,
+                                 timeout=timeout, show_more=False)
+                else:
+                    _log("Full context send failed; keeping button for retry")
+                    more_shown = True
                 continue
 
             if data.startswith("f:"):

@@ -139,8 +139,13 @@ def main():
                     continue
                 more_available = False
                 _log("User clicked More")
-                send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-                ch.edit_buttons(msg_id, _build_buttons(show_more=False))
+                sent = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
+                if sent > 0:
+                    ch.edit_buttons(msg_id, _build_buttons(show_more=False))
+                else:
+                    # All sends failed — allow the user to retry.
+                    _log("Full context send failed; keeping button for retry")
+                    more_available = True
                 continue
 
             if data == "stop:continue":

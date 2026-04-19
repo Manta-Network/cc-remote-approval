@@ -1299,6 +1299,31 @@ class TestMoreClickIdempotent:
         assert result[0] == "option"
         assert len(calls) == 1
 
+    def test_poll_callback_retries_after_on_more_failure(self):
+        """If on_more returns False (e.g. transport error sending context),
+        the button should remain tappable — a later More click must fire
+        on_more again."""
+        from permission_request import poll_callback
+
+        ch = FakeChannel()
+        queue = [
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "more"},
+            {"type": "callback", "data": "allow"},
+        ]
+        ch.poll = lambda mid: queue.pop(0) if queue else None
+
+        attempts = []
+        def on_more():
+            attempts.append(1)
+            # Fail first attempt, succeed second
+            return len(attempts) >= 2
+
+        result = poll_callback(ch, 100, transcript_path="", poll_start_size=0,
+                               on_more=on_more)
+        assert result == "allow"
+        assert len(attempts) == 2, f"on_more should fire twice, got {len(attempts)}"
+
 
 # --- Stop hook ---
 

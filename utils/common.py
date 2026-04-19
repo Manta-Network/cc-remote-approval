@@ -251,11 +251,36 @@ def send_full_context(ch, reply_to_msg_id, transcript_path, max_turns):
         ch.send_reply(reply_to_msg_id, chunk)
 
 
+def _split_text_at_boundaries(text, limit):
+    """Split raw text into pieces of ≤ limit chars each, preferring to cut
+    at paragraph / newline / space boundaries so we don't slice through
+    words or lines when a turn exceeds the limit."""
+    parts = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            parts.append(remaining)
+            break
+        window = remaining[:limit]
+        cut = -1
+        for sep in ("\n\n", "\n", " "):
+            idx = window.rfind(sep)
+            if idx > limit // 2:  # avoid tiny leading pieces
+                cut = idx + len(sep)
+                break
+        if cut == -1:
+            cut = limit  # no nice boundary — hard cut
+        parts.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:]
+    return parts
+
+
 def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
     """Return the last N user/assistant turns as HTML-safe message chunks
     (oldest → newest). Each chunk fits under Telegram's 4096-char limit with
-    headroom. A single very long turn is split across multiple chunks with
-    a "(i/N)" suffix so readers know to keep scrolling."""
+    headroom. A single very long turn is split across multiple chunks at
+    paragraph/line/word boundaries (never mid-entity) with a "(part i/N)"
+    marker so readers know to keep scrolling."""
     messages = extract_last_messages(transcript_path, max_messages=max_turns, max_chars=None)
     chunks = []
     for idx, msg in enumerate(messages, start=1):
@@ -271,16 +296,17 @@ def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
             except (ValueError, TypeError):
                 pass
         header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n"
-        body = html_escape(mask_secrets(msg["text"]))
-        # Room for header + continuation marker
+        raw_body = mask_secrets(msg["text"])
+        # Split on RAW text, then escape each piece — ensures we never cut
+        # an HTML entity in half.
         body_limit = chunk_limit - len(header) - 40
-        if len(body) <= body_limit:
-            chunks.append(header + body)
+        raw_parts = _split_text_at_boundaries(raw_body, body_limit)
+        if len(raw_parts) == 1:
+            chunks.append(header + html_escape(raw_parts[0]))
         else:
-            parts = [body[i:i + body_limit] for i in range(0, len(body), body_limit)]
-            total = len(parts)
-            for i, part in enumerate(parts, start=1):
-                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{part}")
+            total = len(raw_parts)
+            for i, part in enumerate(raw_parts, start=1):
+                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{html_escape(part)}")
     return chunks
 
 

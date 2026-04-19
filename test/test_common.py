@@ -373,3 +373,39 @@ class TestBuildFullContextChunks:
     def test_empty_transcript_returns_empty(self, tmp_path):
         assert build_full_context_chunks("/nonexistent", max_turns=3) == []
 
+    def test_split_never_breaks_html_entity(self, tmp_path):
+        """When a turn has characters that HTML-escape into entities (like &),
+        the split must happen BEFORE escaping so a single '&' never becomes
+        a half '&amp;' across two chunks."""
+        transcript = tmp_path / "t.jsonl"
+        # Pack many '&' so some will land near the chunk boundary
+        body = "foo & bar " * 1000
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": body}
+        }))
+        chunks = build_full_context_chunks(str(transcript), max_turns=1, chunk_limit=2000)
+        assert len(chunks) > 1
+        for chunk in chunks:
+            # A broken "&amp;" would leave either "&am" at end or "p;" at start
+            assert "&am " not in chunk and not chunk.rstrip().endswith("&am")
+            assert not chunk.lstrip().startswith("p;")
+            # Must still be valid bounded chunks
+            assert len(chunk) <= 4096
+
+    def test_split_prefers_line_boundaries(self, tmp_path):
+        """Long multi-line body should split at newline, not mid-line."""
+        transcript = tmp_path / "t.jsonl"
+        # Use varied words so mask_secrets doesn't collapse the body
+        lines = [f"line number {i:03d} with some content words here" for i in range(200)]
+        body = "\n".join(lines)
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": body}
+        }))
+        chunks = build_full_context_chunks(str(transcript), max_turns=1, chunk_limit=2000)
+        assert len(chunks) > 1
+        # All "line number NNN" markers should appear intact across the
+        # chunks combined (no one got sliced in half)
+        combined = "\n".join(chunks)
+        for i in range(200):
+            assert f"line number {i:03d}" in combined
+

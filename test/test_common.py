@@ -348,37 +348,6 @@ class TestExtractLastMessages:
     def test_returns_empty_for_empty_path(self):
         assert extract_last_messages("") == []
 
-    def test_send_full_context_reports_partial_failure(self, tmp_path):
-        """send_full_context returns (sent, total). A partial send — some
-        chunks succeed, some fail — must NOT be mistaken for full success
-        by the caller, otherwise the user gets a truncated context with
-        no retry path. Use a single oversized turn so it splits into
-        multiple chunks (the packing logic would otherwise merge small
-        turns into one)."""
-        import json as _json
-        from utils.common import send_full_context
-
-        transcript = tmp_path / "t.jsonl"
-        # One very big turn → splits across multiple chunks
-        big = "word " * 15000
-        transcript.write_text(_json.dumps({
-            "message": {"role": "user", "content": big}
-        }))
-
-        class PartialChannel:
-            def __init__(self):
-                self.calls = 0
-            def send_reply(self, reply_to, text, parse_mode="HTML"):
-                self.calls += 1
-                # First succeeds, later ones fail
-                return 42 if self.calls == 1 else None
-
-        ch = PartialChannel()
-        sent, total = send_full_context(ch, 100, str(transcript), max_turns=1)
-        assert total > 1, "test needs a multi-chunk context to exercise partial failure"
-        assert sent == 1
-        assert sent < total, "partial failure should not read as full success"
-
     def test_max_messages_zero_returns_empty(self, tmp_path):
         """Python's messages[-0:] == messages[:] (full list). max_messages=0
         must short-circuit to [] so context_turns=0 doesn't blow up into
@@ -496,22 +465,6 @@ class TestBuildFullContextChunks:
     def test_empty_transcript_returns_empty(self, tmp_path):
         assert build_full_context_chunks("/nonexistent", max_turns=3) == []
 
-    def test_send_full_context_zero_when_nothing_to_send(self, tmp_path):
-        """With max_turns=0 the helper returns (0, 0) — callers must treat
-        this as 'done, nothing to retry', not as a failure that leaves the
-        button in place forever."""
-        from utils.common import send_full_context
-
-        transcript = tmp_path / "t.jsonl"
-        transcript.write_text(json.dumps(
-            {"message": {"role": "user", "content": "some content words here"}}
-        ))
-
-        class Ch:
-            def send_reply(self, *a, **kw): return 1
-
-        sent, total = send_full_context(Ch(), 100, str(transcript), max_turns=0)
-        assert sent == 0 and total == 0
 
     def test_split_never_breaks_html_entity(self, tmp_path):
         """When a turn has characters that HTML-escape into entities (like &),
@@ -576,3 +529,48 @@ class TestBuildFullContextChunks:
         for i in range(200):
             assert f"line number {i:03d}" in combined
 
+
+
+class TestSendFullContext:
+    """send_full_context returns (sent, total) so callers can distinguish
+    partial failure (retry-worthy) from full success or nothing-to-send."""
+
+    def test_reports_partial_failure(self, tmp_path):
+        """First chunk succeeds, later ones fail — result must show sent <
+        total so the caller keeps the More button tappable for retry."""
+        from utils.common import send_full_context
+
+        transcript = tmp_path / "t.jsonl"
+        big = "word " * 15000  # forces multi-chunk split
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": big}
+        }))
+
+        class PartialChannel:
+            def __init__(self):
+                self.calls = 0
+            def send_reply(self, reply_to, text, parse_mode="HTML"):
+                self.calls += 1
+                return 42 if self.calls == 1 else None
+
+        ch = PartialChannel()
+        sent, total = send_full_context(ch, 100, str(transcript), max_turns=1)
+        assert total > 1
+        assert sent == 1
+        assert sent < total
+
+    def test_zero_when_nothing_to_send(self, tmp_path):
+        """max_turns=0 → returns (0, 0). Callers treat 0==0 as terminal
+        (nothing to retry, just drop the button)."""
+        from utils.common import send_full_context
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(json.dumps(
+            {"message": {"role": "user", "content": "some content words here"}}
+        ))
+
+        class Ch:
+            def send_reply(self, *a, **kw): return 1
+
+        sent, total = send_full_context(Ch(), 100, str(transcript), max_turns=0)
+        assert sent == 0 and total == 0

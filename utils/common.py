@@ -353,7 +353,7 @@ def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
                 time_label = f"[<code>{dt.strftime('%H:%M')}</code>] "
             except (ValueError, TypeError):
                 pass
-        header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n"
+        header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
         raw_body = mask_secrets(msg["text"])
         body_limit = chunk_limit - len(header) - 40
         escaped_parts = _split_escaped_at_boundaries(raw_body, body_limit)

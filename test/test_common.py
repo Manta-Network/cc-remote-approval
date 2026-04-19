@@ -348,6 +348,35 @@ class TestExtractLastMessages:
     def test_returns_empty_for_empty_path(self):
         assert extract_last_messages("") == []
 
+    def test_send_full_context_reports_partial_failure(self, tmp_path):
+        """send_full_context returns (sent, total). A partial send — some
+        chunks succeed, some fail — must NOT be mistaken for full success
+        by the caller, otherwise the user gets a truncated context with
+        no retry path."""
+        import json as _json
+        from utils.common import send_full_context
+
+        transcript = tmp_path / "t.jsonl"
+        lines = [
+            _json.dumps({"message": {"role": "user", "content": f"turn {i} content words"}})
+            for i in range(3)
+        ]
+        transcript.write_text("\n".join(lines))
+
+        class PartialChannel:
+            def __init__(self):
+                self.calls = 0
+            def send_reply(self, reply_to, text, parse_mode="HTML"):
+                self.calls += 1
+                # First succeeds, later ones fail
+                return 42 if self.calls == 1 else None
+
+        ch = PartialChannel()
+        sent, total = send_full_context(ch, 100, str(transcript), max_turns=3)
+        assert total == 3
+        assert sent == 1
+        assert sent < total, "partial failure should not read as full success"
+
     def test_max_messages_zero_returns_empty(self, tmp_path):
         """Python's messages[-0:] == messages[:] (full list). max_messages=0
         must short-circuit to [] so context_turns=0 doesn't blow up into

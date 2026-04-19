@@ -195,18 +195,18 @@ def _child_run(cfg, server_name, message, fields,
 
             if data == "more" and more_shown:
                 # Flip first so rapid-duplicate clicks drop; restore on
-                # failure so the user can still retry.
+                # partial/total failure so the user can still retry.
                 more_shown = False
                 _log("User clicked More")
-                sent = send_full_context(ch, msg_id, transcript_path,
-                                         cfg.get("context_turns", 3))
-                if sent > 0:
+                sent, total = send_full_context(ch, msg_id, transcript_path,
+                                                cfg.get("context_turns", 3))
+                if total > 0 and sent == total:
                     # Rebuild the form with current filled-state so the user
                     # sees an accurate reflection of what will be submitted.
                     _update_form(ch, msg_id, message, fields, form_data,
                                  timeout=timeout, show_more=False)
                 else:
-                    _log("Full context send failed; keeping button for retry")
+                    _log(f"Full context incomplete ({sent}/{total}); keeping button")
                     more_shown = True
                 continue
 

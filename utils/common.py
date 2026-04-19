@@ -278,14 +278,16 @@ def send_full_context(ch, reply_to_msg_id, transcript_path, max_turns):
     Each turn becomes one (or more) TG messages threaded under the
     original. Used by every hook's "Full context" button.
 
-    Returns the number of chunks successfully sent. Callers should only
-    remove the Full context button when this is > 0 — otherwise a
-    transient transport failure would silently hide the feature."""
+    Returns (sent_count, total_count). Callers should only remove the
+    Full context button when sent_count == total_count — a partial
+    success leaves the user with a truncated prefix and no retry path
+    if we claim success too early."""
+    chunks = build_full_context_chunks(transcript_path, max_turns=max_turns)
     sent = 0
-    for chunk in build_full_context_chunks(transcript_path, max_turns=max_turns):
+    for chunk in chunks:
         if ch.send_reply(reply_to_msg_id, chunk):
             sent += 1
-    return sent
+    return sent, len(chunks)
 
 
 def _split_escaped_at_boundaries(raw_text, limit):

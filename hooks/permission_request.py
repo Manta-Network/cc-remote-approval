@@ -437,13 +437,14 @@ def main():
 
         def _on_more_question(selected, multi_state):
             _log("User clicked More")
-            sent = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            if sent > 0:
+            sent, total = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
+            fully_sent = total > 0 and sent == total
+            if fully_sent:
                 ch.edit_buttons(msg_id, _build_question_keyboard(
                     options, multi_state, selected, show_more=False))
             else:
-                _log("Full context send failed; keeping button for retry")
-            return sent > 0
+                _log(f"Full context incomplete ({sent}/{total}); keeping button")
+            return fully_sent
 
         answer_type, answer_value = poll_question_answer(
             ch, msg_id, options, multi, transcript_path, poll_start_size,
@@ -486,13 +487,14 @@ def main():
 
         def _on_more():
             _log("User clicked More")
-            sent = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
-            if sent > 0:
+            sent, total = send_full_context(ch, msg_id, transcript_path, cfg["context_turns"])
+            fully_sent = total > 0 and sent == total
+            if fully_sent:
                 ch.edit_buttons(msg_id, build_approval_buttons(
                     permission_suggestions, show_more=False))
             else:
-                _log("Full context send failed; keeping button for retry")
-            return sent > 0
+                _log(f"Full context incomplete ({sent}/{total}); keeping button")
+            return fully_sent
 
         answer = poll_callback(ch, msg_id, transcript_path, poll_start_size,
                                on_more=_on_more)

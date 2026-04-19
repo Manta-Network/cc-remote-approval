@@ -25,6 +25,7 @@ import time
 from utils.common import (load_config, html_escape, make_logger, mask_secrets,
                           format_context_lines, format_context_block,
                           check_local_response, STOP_SIGNAL_DIR,
+                          build_full_context_chunks,
                           session_tag as common_session_tag)
 from utils.channel import create_channel
 
@@ -75,15 +76,20 @@ def main():
     text += f"\n\n⏳ Tap Continue within {wait_seconds}s, or Claude Code will idle."
     text += format_context_block(context_lines)
 
-    buttons = [
-        [
+    def _build_buttons(show_more=True):
+        rows = [[
             {"text": "✏️ Continue", "callback_data": "stop:continue"},
             {"text": "❌ Dismiss", "callback_data": "stop:dismiss"},
-        ]
-    ]
+        ]]
+        if show_more:
+            rows.append([{"text": "📖 More context", "callback_data": "stop:more"}])
+        return rows
+
+    buttons = _build_buttons()
+    more_available = bool(transcript_path)
 
     try:
-        msg_id = ch.send_message(text, buttons=buttons)
+        msg_id = ch.send_message(text, buttons=buttons if more_available else _build_buttons(show_more=False))
         _log(f"Sent stop message msg_id={msg_id}")
     except Exception as e:
         _log(f"SEND FAILED: {e}")
@@ -125,6 +131,16 @@ def main():
 
         if update["type"] == "callback":
             data = update["data"]
+
+            if data == "stop:more":
+                _log("User clicked More")
+                chunks = build_full_context_chunks(
+                    transcript_path, max_turns=cfg["context_turns"])
+                for chunk in chunks:
+                    ch.send_reply(msg_id, chunk)
+                more_available = False
+                ch.edit_buttons(msg_id, _build_buttons(show_more=False))
+                continue
 
             if data == "stop:continue":
                 _log("User clicked Continue")

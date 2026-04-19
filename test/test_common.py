@@ -11,6 +11,7 @@ from utils.common import (
     html_escape, sanitize_name, mask_secrets,
     make_logger, load_config, check_local_response,
     extract_last_messages, smart_truncate, DEFAULTS,
+    build_full_context_chunks,
 )
 
 
@@ -332,3 +333,43 @@ class TestExtractLastMessages:
         # Inner text preserved
         assert "(no content)" in msgs[0]["text"]
         assert "Injected preamble" in msgs[0]["text"]
+
+
+class TestBuildFullContextChunks:
+    """build_full_context_chunks returns full (untruncated) turns, splitting
+    oversized ones across multiple chunks with a (part i/N) marker."""
+
+    def test_returns_chunk_per_turn(self, tmp_path):
+        transcript = tmp_path / "t.jsonl"
+        lines = [
+            json.dumps({"message": {"role": "user", "content": "first turn"}}),
+            json.dumps({"message": {"role": "assistant", "content": "second turn"}}),
+            json.dumps({"message": {"role": "user", "content": "third turn"}}),
+        ]
+        transcript.write_text("\n".join(lines))
+        chunks = build_full_context_chunks(str(transcript), max_turns=3)
+        assert len(chunks) == 3
+        assert "first turn" in chunks[0]
+        assert "second turn" in chunks[1]
+        assert "third turn" in chunks[2]
+
+    def test_splits_oversized_turn(self, tmp_path):
+        transcript = tmp_path / "t.jsonl"
+        big = "x" * 9000  # much bigger than any single TG message allows
+        transcript.write_text(json.dumps({
+            "message": {"role": "user", "content": big}
+        }))
+        chunks = build_full_context_chunks(str(transcript), max_turns=1)
+        assert len(chunks) > 1
+        # Every chunk must be under TG's 4096 char limit
+        for chunk in chunks:
+            assert len(chunk) <= 4096
+        # Combined body preserves the full content
+        combined = "".join(chunks)
+        assert combined.count("x") == 9000
+        # Continuation marker appears
+        assert "part 1/" in chunks[0]
+
+    def test_empty_transcript_returns_empty(self, tmp_path):
+        assert build_full_context_chunks("/nonexistent", max_turns=3) == []
+

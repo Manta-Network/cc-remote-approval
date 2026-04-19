@@ -721,15 +721,23 @@ class TestElicitationFormBuilding:
             {"name": "ok", "type": "boolean", "title": "OK",
              "required": False, "enum": None, "default": None},
         ]
-        text, buttons = _build_form_message("Please configure", fields)
+        text, buttons = _build_form_message("Please configure", fields, show_more=False)
         assert "Please configure" in text
         # enum buttons + boolean buttons + submit/cancel
         assert len(buttons) >= 3
-        # Last row should be submit/cancel
+        # With show_more=False, last row is submit/cancel
         last_row = buttons[-1]
         labels = [b["text"] for b in last_row]
         assert "✅ Submit" in labels
         assert "❌ Cancel" in labels
+
+    def test_build_form_message_includes_more_button(self):
+        from elicitation import _build_form_message
+        fields = [{"name": "env", "type": "string", "title": "Env",
+                   "enum": ["prod"], "required": True, "default": None}]
+        _, buttons = _build_form_message("X", fields, show_more=True)
+        flat = [b["callback_data"] for row in buttons for b in row]
+        assert "more" in flat
 
     def test_update_form_shows_filled_fields(self):
         from elicitation import _update_form

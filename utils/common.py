@@ -184,7 +184,8 @@ def extract_last_messages(transcript_path, max_messages=3, max_chars=200):
             text = _strip_system_tags(text).strip()
             if not text or len(text) < 3 or role not in ("user", "assistant"):
                 continue
-            messages.append({"role": role, "text": text[:max_chars],
+            truncated = text if max_chars is None else text[:max_chars]
+            messages.append({"role": role, "text": truncated,
                              "timestamp": obj.get("timestamp", "")})
         return messages[-max_messages:]
     except Exception:
@@ -240,6 +241,39 @@ def format_context_block(context_lines):
     sep = "\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
     body = sep.join(context_lines)
     return f"\n\n📋 <b>Context:</b>\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n{body}"
+
+
+def build_full_context_chunks(transcript_path, max_turns=3, chunk_limit=3900):
+    """Return the last N user/assistant turns as HTML-safe message chunks
+    (oldest → newest). Each chunk fits under Telegram's 4096-char limit with
+    headroom. A single very long turn is split across multiple chunks with
+    a "(i/N)" suffix so readers know to keep scrolling."""
+    messages = extract_last_messages(transcript_path, max_messages=max_turns, max_chars=None)
+    chunks = []
+    for idx, msg in enumerate(messages, start=1):
+        prefix = "👤" if msg["role"] == "user" else "🤖"
+        ts = msg.get("timestamp", "")
+        time_label = ""
+        if ts:
+            try:
+                from datetime import datetime
+                clean = ts.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(clean).astimezone()
+                time_label = f"[<code>{dt.strftime('%H:%M')}</code>] "
+            except (ValueError, TypeError):
+                pass
+        header = f"{time_label}{prefix} <b>Turn {idx}/{len(messages)}</b>\n"
+        body = html_escape(mask_secrets(msg["text"]))
+        # Room for header + continuation marker
+        body_limit = chunk_limit - len(header) - 40
+        if len(body) <= body_limit:
+            chunks.append(header + body)
+        else:
+            parts = [body[i:i + body_limit] for i in range(0, len(body), body_limit)]
+            total = len(parts)
+            for i, part in enumerate(parts, start=1):
+                chunks.append(f"{header}<i>(part {i}/{total})</i>\n{part}")
+    return chunks
 
 
 MAX_LOG_SIZE = 1024 * 1024  # 1 MB

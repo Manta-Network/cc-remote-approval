@@ -40,7 +40,7 @@ cc-remote-approval/
 │   │   └── SKILL.md         # /cc-remote-approval:setup interactive configuration
 │   └── status/
 │       └── SKILL.md         # /cc-remote-approval:status health check
-├── test/                        # 212 automated tests
+├── test/                        # 216 automated tests
 │   ├── scenarios.py             # FakeChannel + shared test scenarios (channel-agnostic)
 │   ├── test_common.py           # utils/common.py tests
 │   ├── test_hooks.py            # Hook component tests (via FakeChannel)
@@ -112,7 +112,7 @@ All hooks read from `~/.cc-remote-approval/config.json`:
 ## Testing
 
 ```bash
-pytest test/ -v    # 212 tests, ~0.1s
+pytest test/ -v    # 216 tests, ~0.1s
 ```
 
 ### Test Architecture
@@ -174,7 +174,7 @@ Zero test duplication — scenarios written once, channel fixtures written once.
 | Scope | Coverage |
 |---|---|
 | Hookable scenarios (#1-19) | **16/19 (84%)** — #17 intentionally suppressed as duplicate |
-| Automated tests | **212 tests in ~0.1s** |
+| Automated tests | **216 tests in ~0.1s** |
 | All UI scenarios (#1-30) | **16/30 (53%)** |
 
 ## Coding Standards

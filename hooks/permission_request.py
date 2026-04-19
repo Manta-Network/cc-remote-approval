@@ -12,6 +12,7 @@ import time
 from utils.common import (load_config, html_escape, make_logger,
                      mask_secrets, check_local_response, format_context_lines,
                      format_context_block, smart_truncate, POLL_TIMEOUT_SECONDS,
+                     build_full_context_chunks,
                      session_tag as common_session_tag)
 from utils.channel import create_channel
 
@@ -65,7 +66,7 @@ def _format_option_body(options, multi, selected=None):
     return "\n".join(lines)
 
 
-def build_ask_user_question_message(ch, tool_input, context_lines, session_tag=""):
+def build_ask_user_question_message(ch, tool_input, context_lines, session_tag="", show_more=True):
     """For AskUserQuestion: render options inline in the message body and
     use compact emoji-number buttons so long option labels don't get cut."""
     questions = tool_input.get("questions", [])
@@ -93,12 +94,12 @@ def build_ask_user_question_message(ch, tool_input, context_lines, session_tag="
     )
     text = smart_truncate(text, 4000, marker="\n\n<i>…truncated</i>")
 
-    buttons = _build_question_keyboard(options, multi, selected=set())
+    buttons = _build_question_keyboard(options, multi, selected=set(), show_more=show_more)
     msg_id = ch.send_message(text, buttons=buttons)
     return msg_id, question_text, options, multi
 
 
-def _build_question_keyboard(options, multi, selected=None):
+def _build_question_keyboard(options, multi, selected=None, show_more=True):
     """Build inline keyboard. Keycap emoji per option; labels live in the
     message body. Rows of up to 5 buttons to keep things compact on mobile."""
     selected = selected or set()
@@ -118,16 +119,20 @@ def _build_question_keyboard(options, multi, selected=None):
     if multi:
         rows.append([{"text": "✅ Submit", "callback_data": "opt:submit"}])
     rows.append([{"text": "✏️ Other", "callback_data": "opt:other"}])
+    if show_more:
+        rows.append([{"text": "📖 More context", "callback_data": "opt:more"}])
     return rows
 
 
-def poll_question_answer(ch, message_id, options, multi=False, transcript_path="", poll_start_size=0, prompt_ids=None):
+def poll_question_answer(ch, message_id, options, multi=False, transcript_path="", poll_start_size=0, prompt_ids=None, on_more=None):
     """Poll for AskUserQuestion answer via channel.
 
     prompt_ids: optional list, mutated in place as transient ForceReply
     prompts are created. Callers share this list with their cleanup
     handlers so stale prompts are deleted on any exit path (normal
-    resolve, signal, atexit)."""
+    resolve, signal, atexit).
+
+    on_more: optional callable invoked when user taps More. Called in-loop."""
     selected = set()
     # Msg ids we accept replies on. Starts with the question msg_id; the
     # "Other" branch appends the ForceReply prompt msg_id so TG clients
@@ -135,6 +140,7 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
     accepted_ids = [message_id]
     if prompt_ids is None:
         prompt_ids = []
+    more_shown = True
     deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
 
     while time.monotonic() < deadline:
@@ -157,6 +163,12 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
             if not data.startswith("opt:"):
                 continue
             action = data.split(":", 1)[1] if ":" in data else ""
+
+            if action == "more":
+                if on_more and more_shown:
+                    on_more(selected, multi)
+                    more_shown = False
+                continue
 
             if action == "other":
                 prompt_id = ch.send_reply_prompt(
@@ -182,7 +194,7 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
                     selected.discard(idx)
                 else:
                     selected.add(idx)
-                buttons = _build_question_keyboard(options, multi, selected)
+                buttons = _build_question_keyboard(options, multi, selected, show_more=more_shown)
                 ch.edit_buttons(message_id, buttons)
                 continue
             else:
@@ -197,7 +209,20 @@ def poll_question_answer(ch, message_id, options, multi=False, transcript_path="
     return "timeout", None
 
 
-def send_approval_message(ch, tool_name, tool_display, context_lines, permission_suggestions=None, session_tag=""):
+def build_approval_buttons(permission_suggestions=None, show_more=True):
+    """Assemble inline-keyboard rows for an approval message. Separate
+    helper so we can rebuild without More after the user taps it."""
+    row = [{"text": "✅ Allow", "callback_data": "allow"}]
+    if permission_suggestions:
+        row.append({"text": "✅ Always", "callback_data": "always"})
+    row.append({"text": "❌ Deny", "callback_data": "deny"})
+    rows = [row]
+    if show_more:
+        rows.append([{"text": "📖 More context", "callback_data": "more"}])
+    return rows
+
+
+def send_approval_message(ch, tool_name, tool_display, context_lines, permission_suggestions=None, session_tag="", show_more=True):
     context_text = format_context_block(context_lines)
 
     cmd_block = f"\n\n<pre>{html_escape(tool_display)}</pre>" if tool_display else ""
@@ -208,23 +233,17 @@ def send_approval_message(ch, tool_name, tool_display, context_lines, permission
         f"{context_text}"
     )
     text = smart_truncate(text, 4000, marker="\n\n<i>…truncated</i>")
-
-    # Show "Always" only when permission_suggestions is non-empty
-    # (Claude Code sets it to [] for dangerous commands, and omits it entirely
-    # for tools like ExitPlanMode that require user interaction every time)
-    buttons = [
-        {"text": "✅ Allow", "callback_data": "allow"},
-    ]
-    if permission_suggestions:
-        buttons.append({"text": "✅ Always", "callback_data": "always"})
-    buttons.append({"text": "❌ Deny", "callback_data": "deny"})
-    return ch.send_message(text, buttons=[buttons])
+    return ch.send_message(text, buttons=build_approval_buttons(permission_suggestions, show_more=show_more))
 
 
 
-def poll_callback(ch, message_id, transcript_path="", poll_start_size=0):
+def poll_callback(ch, message_id, transcript_path="", poll_start_size=0,
+                  on_more=None):
     """Poll channel for callback only (ignores text messages).
-    Runs until response, local action, or POLL_TIMEOUT_SECONDS (3 days)."""
+    Runs until response, local action, or POLL_TIMEOUT_SECONDS (3 days).
+
+    on_more: optional callable invoked when the user taps "More". Called
+    in-loop so polling continues (not a terminal decision like allow/deny)."""
     deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
 
     while time.monotonic() < deadline:
@@ -237,6 +256,9 @@ def poll_callback(ch, message_id, transcript_path="", poll_start_size=0):
             # with the channel callback.
             if check_local_response(transcript_path, poll_start_size, threshold=100):
                 return "local"
+            if update["data"] == "more" and on_more:
+                on_more()
+                continue
             return update["data"]
 
         time.sleep(1)
@@ -395,16 +417,26 @@ def main():
     if tool_name == "AskUserQuestion":
         try:
             msg_id, question_text, options, multi = build_ask_user_question_message(
-                ch, tool_input, context_lines, session_tag=session_tag)
+                ch, tool_input, context_lines, session_tag=session_tag,
+                show_more=bool(transcript_path))
             state["msg_id"] = msg_id
             _log(f"SENT question msg_id={msg_id} multi={multi}")
         except Exception as e:
             _log(f"SEND FAILED: {e}")
             sys.exit(0)
 
+        def _on_more_question(selected, multi_state):
+            _log("User clicked More")
+            chunks = build_full_context_chunks(
+                transcript_path, max_turns=cfg["context_turns"])
+            for chunk in chunks:
+                ch.send_reply(msg_id, chunk)
+            ch.edit_buttons(msg_id, _build_question_keyboard(
+                options, multi_state, selected, show_more=False))
+
         answer_type, answer_value = poll_question_answer(
             ch, msg_id, options, multi, transcript_path, poll_start_size,
-            prompt_ids=state["prompt_ids"])
+            prompt_ids=state["prompt_ids"], on_more=_on_more_question)
 
         state["resolved"] = True
         if answer_type == "local":
@@ -433,14 +465,25 @@ def main():
         try:
             msg_id = send_approval_message(
                 ch, tool_name, tool_display, context_lines,
-                permission_suggestions, session_tag=session_tag)
+                permission_suggestions, session_tag=session_tag,
+                show_more=bool(transcript_path))
             state["msg_id"] = msg_id
             _log(f"SENT msg_id={msg_id}")
         except Exception as e:
             _log(f"SEND FAILED: {e}")
             sys.exit(0)
 
-        answer = poll_callback(ch, msg_id, transcript_path, poll_start_size)
+        def _on_more():
+            _log("User clicked More")
+            chunks = build_full_context_chunks(
+                transcript_path, max_turns=cfg["context_turns"])
+            for chunk in chunks:
+                ch.send_reply(msg_id, chunk)
+            ch.edit_buttons(msg_id, build_approval_buttons(
+                permission_suggestions, show_more=False))
+
+        answer = poll_callback(ch, msg_id, transcript_path, poll_start_size,
+                               on_more=_on_more)
 
         state["resolved"] = True
         if answer == "local":

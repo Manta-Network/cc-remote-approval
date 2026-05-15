@@ -59,6 +59,13 @@ For local development, point the marketplace at your clone instead:
 /reload-plugins
 ```
 
+### Windows note
+
+The hook commands invoke `python3`. On a stock Windows install, `python3` resolves to the Microsoft Store alias stub (exits immediately) — Python's official Windows installer only provides `python.exe`. Pick one:
+
+- **Shim (recommended):** in PowerShell as admin, `New-Item -ItemType SymbolicLink -Path "$(Split-Path (Get-Command python).Source)\python3.exe" -Target (Get-Command python).Source`. Survives reinstalls of the plugin.
+- **Or:** disable the Store aliases (Settings → Apps → Advanced app settings → App execution aliases → turn off both `python.exe` and `python3.exe`) so Windows stops shadowing your real Python.
+
 ## Setup
 
 In Claude Code, run `/cc-remote-approval:setup` to configure interactively, or manually create `~/.cc-remote-approval/config.json`. After setup, run `/cc-remote-approval:status` any time to verify the channel is working (bot token valid, chat reachable, recent hook activity).

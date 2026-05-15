@@ -59,6 +59,13 @@ Claude Code 需要权限 → 本地弹出原生对话框（照常）
 /reload-plugins
 ```
 
+### Windows 用户注意
+
+Hook 命令调用的是 `python3`。Windows 默认安装下 `python3` 会指向 Microsoft Store 的 alias stub（运行立即退出）—— python.org 官方安装包只提供 `python.exe`，不带 `python3.exe`。任选其一处理：
+
+- **加 shim（推荐）：** 以管理员身份打开 PowerShell，执行 `New-Item -ItemType SymbolicLink -Path "$(Split-Path (Get-Command python).Source)\python3.exe" -Target (Get-Command python).Source`。重装插件不会失效。
+- **或者：** 关掉 Store 的 alias —— 设置 → 应用 → 应用的高级设置 → 应用执行别名，把 `python.exe` 和 `python3.exe` 两项都关掉，避免 Windows 抢占你真正的 Python。
+
 ## 配置
 
 在 Claude Code 中运行 `/cc-remote-approval:setup` 进行交互式配置，或手动创建 `~/.cc-remote-approval/config.json`：

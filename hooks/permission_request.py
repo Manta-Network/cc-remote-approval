@@ -344,7 +344,7 @@ def main():
         state["resolved"] = True
         if state["msg_id"] and state["ch"]:
             import signal as _sig
-            status = "expired" if sig == _sig.SIGPIPE else "local"
+            status = "expired" if sig == getattr(_sig, "SIGPIPE", None) else "local"
             edit_message_resolved(
                 state["ch"], state["msg_id"],
                 status, state["tool_name"], state["tool_display"],
@@ -365,8 +365,14 @@ def main():
 
     atexit.register(on_exit)
 
-    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGPIPE):
-        signal.signal(sig, on_signal)
+    for name in ("SIGTERM", "SIGHUP", "SIGINT", "SIGPIPE"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, on_signal)
+        except (OSError, ValueError):
+            pass
 
     try:
         raw = sys.stdin.read()
